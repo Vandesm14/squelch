@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 cpal = "0.15.2"
 hound = "3.5.0"
+nannou = "0.18.1"
+spectrum-analyzer = "1.4.0"

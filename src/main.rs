@@ -1,15 +1,26 @@
-use std::{
-  fs::File,
-  io::BufWriter,
-  sync::{Arc, Mutex},
-};
+use cpal::Stream;
+use nannou::prelude::*;
 
-use cpal::{
-  traits::{DeviceTrait, HostTrait, StreamTrait},
-  FromSample, Sample,
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+use spectrum_analyzer::{
+  samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };
+use spectrum_analyzer::{scaling::divide_by_N_sqrt, windows::hann_window};
+use std::sync::mpsc::{self, Receiver};
+
+struct Model {
+  samples: Vec<f32>,
+  spectrum: Option<FrequencySpectrum>,
+  samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
+  stream: Stream,
+}
 
 fn main() {
+  nannou::app(model).update(update).simple_window(view).run();
+}
+
+fn model(app: &App) -> Model {
   let host = cpal::default_host();
 
   // Set up the input device and stream with the default input config.
@@ -19,100 +30,80 @@ fn main() {
   let config = device.default_input_config().unwrap();
   println!("Default input config: {:?}", config);
 
-  // The WAV file we're recording to.
-  const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/recorded.wav");
-  let spec = wav_spec_from_config(&config);
-  let writer = hound::WavWriter::create(PATH, spec).unwrap();
-  let writer = Arc::new(Mutex::new(Some(writer)));
+  let (tx, rx) = mpsc::channel();
 
   // A flag to indicate that recording is in progress.
   println!("Begin recording...");
-
-  // Run the input stream on a separate thread.
-  let writer_2 = writer.clone();
 
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
   };
 
-  let stream = match config.sample_format() {
-    cpal::SampleFormat::I8 => device
-      .build_input_stream(
-        &config.into(),
-        move |data, _: &_| write_input_data::<i8, i8>(data, &writer_2),
-        err_fn,
-        None,
-      )
-      .unwrap(),
-    cpal::SampleFormat::I16 => device
-      .build_input_stream(
-        &config.into(),
-        move |data, _: &_| write_input_data::<i16, i16>(data, &writer_2),
-        err_fn,
-        None,
-      )
-      .unwrap(),
-    cpal::SampleFormat::I32 => device
-      .build_input_stream(
-        &config.into(),
-        move |data, _: &_| write_input_data::<i32, i32>(data, &writer_2),
-        err_fn,
-        None,
-      )
-      .unwrap(),
-    cpal::SampleFormat::F32 => device
-      .build_input_stream(
-        &config.into(),
-        move |data, _: &_| write_input_data::<f32, f32>(data, &writer_2),
-        err_fn,
-        None,
-      )
-      .unwrap(),
-    sample_format => panic!("Unsupported sample format '{sample_format}'"),
-  };
+  let stream = device
+    .build_input_stream(
+      &config.into(),
+      move |data: &[f32], _: &_| {
+        // Sending data to the main thread
+        let data_vec = data.to_vec();
+        tx.send(data_vec).expect("Failed to send samples");
+      },
+      err_fn,
+      None,
+    )
+    .unwrap();
 
   stream.play().unwrap();
 
-  // Let recording go for roughly three seconds.
-  std::thread::sleep(std::time::Duration::from_secs(3));
-  drop(stream);
-
-  writer.lock().unwrap().take().unwrap().finalize().unwrap();
-  println!("Recording {} complete!", PATH);
-}
-
-fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
-  if format.is_float() {
-    hound::SampleFormat::Float
-  } else {
-    hound::SampleFormat::Int
+  // Set up your audio stream and provide the sender to the callback here...
+  Model {
+    samples: Vec::new(),
+    spectrum: None,
+    samples_receiver: rx,
+    stream,
   }
 }
 
-fn wav_spec_from_config(
-  config: &cpal::SupportedStreamConfig,
-) -> hound::WavSpec {
-  hound::WavSpec {
-    channels: config.channels() as _,
-    sample_rate: config.sample_rate().0 as _,
-    bits_per_sample: (config.sample_format().sample_size() * 8) as _,
-    sample_format: sample_format(config.sample_format()),
+fn update(_app: &App, model: &mut Model, _update: Update) {
+  while let Ok(new_samples) = model.samples_receiver.try_recv() {
+    model.samples.extend(new_samples);
+  }
+
+  if model.samples.len() > 2048 {
+    model.samples = model.samples.split_off(model.samples.len() - 2048);
+  }
+
+  if !model.samples.is_empty() {
+    let spectrum = apply_fft(&model.samples);
+    model.spectrum = Some(spectrum);
   }
 }
 
-type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
+fn view(app: &App, model: &Model, frame: Frame) {
+  let draw = app.draw();
+  draw.background().color(BLACK);
 
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
-where
-  T: Sample,
-  U: Sample + hound::Sample + FromSample<T>,
-{
-  if let Ok(mut guard) = writer.try_lock() {
-    if let Some(writer) = guard.as_mut() {
-      for &sample in input.iter() {
-        let sample: U = U::from_sample(sample);
-        writer.write_sample(sample).ok();
-      }
-    }
-  }
+  draw.text(&model.samples.len().to_string());
+
+  // Here you can access model.samples and model.spectrum
+  // to visualize the audio data...
+
+  draw.to_frame(app, &frame).unwrap();
+}
+
+fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
+  // apply hann window for smoothing; length must be a power of 2 for the FFT
+  // 2048 is a good starting point with 44100 kHz
+  let hann_window = hann_window(&samples[0..256]);
+  // calc spectrum
+  samples_fft_to_spectrum(
+    // (windowed) samples
+    &hann_window,
+    // sampling rate
+    44100,
+    // optional frequency limit: e.g. only interested in frequencies 50 <= f <= 150?
+    FrequencyLimit::Range(0.0, 10_000.0),
+    // optional scale
+    Some(&divide_by_N_sqrt),
+  )
+  .unwrap()
 }

@@ -68,7 +68,7 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
     model.samples.extend(new_samples);
   }
 
-  if model.samples.len() > 2048 {
+  if model.samples.len() > (44_100 / 60) {
     model.samples = model.samples.split_off(model.samples.len() - 2048);
   }
 
@@ -82,10 +82,21 @@ fn view(app: &App, model: &Model, frame: Frame) {
   let draw = app.draw();
   draw.background().color(BLACK);
 
-  draw.text(&model.samples.len().to_string());
+  let width = app.window_rect().w();
+  let height = app.window_rect().h();
 
-  // Here you can access model.samples and model.spectrum
-  // to visualize the audio data...
+  if let Some(spectrum) = &model.spectrum {
+    let data = spectrum.data();
+
+    for (i, (_, ampl)) in data.iter().enumerate() {
+      let bar_width = width / data.len() as f32;
+      draw
+        .rect()
+        .x_y((i as f32 * bar_width) - (width / 2.0), 0.0)
+        .height(ampl.val() * (height / 10.0))
+        .width(bar_width);
+    }
+  }
 
   draw.to_frame(app, &frame).unwrap();
 }
@@ -93,7 +104,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
   // apply hann window for smoothing; length must be a power of 2 for the FFT
   // 2048 is a good starting point with 44100 kHz
-  let hann_window = hann_window(&samples[0..256]);
+  let hann_window = hann_window(&samples[0..2048]);
   // calc spectrum
   samples_fft_to_spectrum(
     // (windowed) samples

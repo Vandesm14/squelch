@@ -4,7 +4,7 @@ use nannou::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use spectrum_analyzer::scaling::divide_by_N_sqrt;
-use spectrum_analyzer::windows::{blackman_harris_4term, hann_window};
+use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{
   samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };

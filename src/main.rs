@@ -3,16 +3,18 @@ use nannou::prelude::*;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use spectrum_analyzer::scaling::divide_by_N_sqrt;
+use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{
   samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };
-use spectrum_analyzer::{scaling::divide_by_N_sqrt, windows::hann_window};
 use std::sync::mpsc::{self, Receiver};
 
 struct Model {
   samples: Vec<f32>,
   spectrum: Option<FrequencySpectrum>,
   samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
+  #[allow(dead_code)]
   stream: Stream,
 }
 
@@ -20,7 +22,7 @@ fn main() {
   nannou::app(model).update(update).simple_window(view).run();
 }
 
-fn model(app: &App) -> Model {
+fn model(_: &App) -> Model {
   let host = cpal::default_host();
 
   // Set up the input device and stream with the default input config.
@@ -88,13 +90,14 @@ fn view(app: &App, model: &Model, frame: Frame) {
   if let Some(spectrum) = &model.spectrum {
     let data = spectrum.data();
 
-    for (i, (_, ampl)) in data.iter().enumerate() {
-      let bar_width = width / data.len() as f32;
+    let max_freq = spectrum.max_fr().val();
+    for (i, (freq, ampl)) in data.iter().enumerate() {
       draw
         .rect()
-        .x_y((i as f32 * bar_width) - (width / 2.0), 0.0)
-        .height(ampl.val() * (height / 10.0))
-        .width(bar_width);
+        .x_y((i as f32).log10() * data.len() as f32 - (width / 2.0), 0.0)
+        .height(ampl.val() * (height / 3.0))
+        // .height(height / 5.0)
+        .width(1.0);
     }
   }
 

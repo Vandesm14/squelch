@@ -4,7 +4,7 @@ use nannou::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use spectrum_analyzer::scaling::divide_by_N_sqrt;
-use spectrum_analyzer::windows::hann_window;
+use spectrum_analyzer::windows::{blackman_harris_4term, hann_window};
 use spectrum_analyzer::{
   samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };
@@ -89,16 +89,16 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
   if let Some(spectrum) = &model.spectrum {
     let data = spectrum.data();
+    let points = data.iter().enumerate().map(|(i, (_, ampl))| {
+      (
+        ((i as f32).log10() * data.len() as f32 - (width / 2.0))
+          .clamp(-width / 2.0, width / 2.0),
+        ampl.val() * ((height * 2.0) / (u8::MAX as f32).sqrt())
+          - (height / 2.0),
+      )
+    });
 
-    let max_freq = spectrum.max_fr().val();
-    for (i, (freq, ampl)) in data.iter().enumerate() {
-      draw
-        .rect()
-        .x_y((i as f32).log10() * data.len() as f32 - (width / 2.0), 0.0)
-        .height(ampl.val() * (height / 3.0))
-        // .height(height / 5.0)
-        .width(1.0);
-    }
+    draw.path().stroke().color(WHITE).points(points).finish();
   }
 
   draw.to_frame(app, &frame).unwrap();
@@ -107,11 +107,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
 fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
   // apply hann window for smoothing; length must be a power of 2 for the FFT
   // 2048 is a good starting point with 44100 kHz
-  let hann_window = hann_window(&samples[0..2048]);
+  let window = hann_window(&samples[0..2048]);
   // calc spectrum
   samples_fft_to_spectrum(
     // (windowed) samples
-    &hann_window,
+    &window,
     // sampling rate
     44100,
     // optional frequency limit: e.g. only interested in frequencies 50 <= f <= 150?

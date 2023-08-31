@@ -14,7 +14,7 @@ struct Model {
   samples: Vec<f32>,
   spectrum: Option<FrequencySpectrum>,
   samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
-  samples_sender: Sender<Vec<f32>>, // Sender to send samples to the callback
+  samples_sender: Sender<f32>, // Sender to send samples to the callback
   #[allow(dead_code)]
   stream: Stream,
   #[allow(dead_code)]
@@ -27,7 +27,7 @@ fn main() {
 
 fn model(_: &App) -> Model {
   let (tx, rx) = mpsc::channel();
-  let (out_tx, out_rx) = mpsc::channel::<Vec<f32>>();
+  let (out_tx, out_rx) = mpsc::channel::<f32>();
 
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
@@ -55,18 +55,11 @@ fn model(_: &App) -> Model {
     .build_output_stream(
       &out_config.into(),
       move |data: &mut [f32], _: &_| {
-        if let Some(samples) = out_rx.try_iter().last() {
-          let iterator = samples.iter();
-          let iterator = if samples.len() > data.len() {
-            iterator.skip(samples.len() - data.len())
-          } else {
-            iterator.skip(0)
-          };
-
-          for (i, sample) in iterator.enumerate() {
-            data[i] = *sample;
-          }
-        }
+        out_rx.try_iter().take(data.len()).enumerate().for_each(
+          |(i, sample)| {
+            data[i] = sample;
+          },
+        );
       },
       err_fn,
       None,
@@ -92,7 +85,9 @@ fn model(_: &App) -> Model {
 fn update(_app: &App, model: &mut Model, _update: Update) {
   while let Ok(new_samples) = model.samples_receiver.try_recv() {
     model.samples.extend(&new_samples);
-    model.samples_sender.send(new_samples).unwrap();
+    new_samples
+      .iter()
+      .for_each(|sample| model.samples_sender.send(*sample).unwrap());
   }
 
   if model.samples.len() > (44_100 / 60) {

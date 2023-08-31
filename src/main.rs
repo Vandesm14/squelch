@@ -64,7 +64,6 @@ fn model(_: &App) -> Model {
 
   println!("Sample rate: {}", spec.sample_rate);
 
-  std::fs::remove_file("out.wav").unwrap();
   let writer = hound::WavWriter::create("out.wav", spec).unwrap();
 
   // Set up your audio stream and provide the sender to the callback here...

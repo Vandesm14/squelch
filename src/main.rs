@@ -1,4 +1,4 @@
-use cpal::Stream;
+use cpal::{FromSample, Sample, Stream};
 use nannou::prelude::*;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -8,7 +8,10 @@ use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{
   samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };
+use std::fs::File;
+use std::io::BufWriter;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 
 struct Model {
   samples: Vec<f32>,
@@ -16,6 +19,7 @@ struct Model {
   samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
   #[allow(dead_code)]
   stream: Stream,
+  writer: WavWriterHandle,
 }
 
 fn main() {
@@ -43,7 +47,7 @@ fn model(_: &App) -> Model {
 
   let stream = device
     .build_input_stream(
-      &config.into(),
+      &config.clone().into(),
       move |data: &[f32], _: &_| {
         // Sending data to the main thread
         let data_vec = data.to_vec();
@@ -56,18 +60,28 @@ fn model(_: &App) -> Model {
 
   stream.play().unwrap();
 
+  let spec = wav_spec_from_config(&config);
+
+  println!("Sample rate: {}", spec.sample_rate);
+
+  std::fs::remove_file("out.wav").unwrap();
+  let writer = hound::WavWriter::create("out.wav", spec).unwrap();
+
   // Set up your audio stream and provide the sender to the callback here...
   Model {
     samples: Vec::new(),
     spectrum: None,
     samples_receiver: rx,
     stream,
+    writer: Arc::new(Mutex::new(Some(writer))),
   }
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
   while let Ok(new_samples) = model.samples_receiver.try_recv() {
-    model.samples.extend(new_samples);
+    model.samples.extend(&new_samples);
+
+    write_input_data::<f32, i16>(&new_samples, &model.writer);
   }
 
   if model.samples.len() > (44_100 / 60) {
@@ -120,4 +134,40 @@ fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
     Some(&divide_by_N_sqrt),
   )
   .unwrap()
+}
+
+fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
+  if format.is_float() {
+    hound::SampleFormat::Float
+  } else {
+    hound::SampleFormat::Int
+  }
+}
+
+fn wav_spec_from_config(
+  config: &cpal::SupportedStreamConfig,
+) -> hound::WavSpec {
+  hound::WavSpec {
+    channels: config.channels() as _,
+    sample_rate: config.sample_rate().0 as _,
+    bits_per_sample: (config.sample_format().sample_size() * 8) as _,
+    sample_format: sample_format(config.sample_format()),
+  }
+}
+
+type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
+
+fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
+where
+  T: Sample,
+  U: Sample + hound::Sample + FromSample<T>,
+{
+  if let Ok(mut guard) = writer.try_lock() {
+    if let Some(writer) = guard.as_mut() {
+      for &sample in input.iter() {
+        let sample: U = U::from_sample(sample);
+        writer.write_sample(sample).ok();
+      }
+    }
+  }
 }

@@ -26,28 +26,21 @@ fn main() {
 }
 
 fn model(_: &App) -> Model {
-  let host = cpal::default_host();
-
-  // Set up the input device and stream with the default input config.
-  let device = host.default_input_device().unwrap();
-  println!("Input device: {}", device.name().unwrap());
-
-  let config = device.default_input_config().unwrap();
-  println!("Default input config: {:?}", config);
-
   let (tx, rx) = mpsc::channel();
-
-  // A flag to indicate that recording is in progress.
-  println!("Begin recording...");
+  let (out_tx, out_rx) = mpsc::channel::<Vec<f32>>();
 
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
   };
+
+  let host = cpal::default_host();
+
+  let device = host.default_input_device().unwrap();
+  let config = device.default_input_config().unwrap();
   let stream = device
     .build_input_stream(
       &config.clone().into(),
       move |data: &[f32], _: &_| {
-        // Sending data to the main thread
         let data_vec = data.to_vec();
         tx.send(data_vec).expect("Failed to send samples");
       },
@@ -56,15 +49,17 @@ fn model(_: &App) -> Model {
     )
     .unwrap();
 
-  let (out_tx, out_rx) = mpsc::channel::<Vec<f32>>();
-
   let out_device = host.default_output_device().unwrap();
   let out_config = out_device.default_output_config().unwrap();
   let out_stream = out_device
     .build_output_stream(
       &out_config.into(),
       move |data: &mut [f32], _: &_| {
-        if let Ok(samples) = out_rx.try_recv() {
+        if let Ok(mut samples) = out_rx.try_recv() {
+          if samples.len() > data.len() {
+            samples.truncate(data.len());
+          }
+
           for (i, sample) in samples.iter().enumerate() {
             data[i] = *sample;
           }
@@ -81,7 +76,6 @@ fn model(_: &App) -> Model {
 
   println!("Sample rate: {}", spec.sample_rate);
 
-  // Set up your audio stream and provide the sender to the callback here...
   Model {
     samples: Vec::new(),
     spectrum: None,

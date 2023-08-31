@@ -55,12 +55,15 @@ fn model(_: &App) -> Model {
     .build_output_stream(
       &out_config.into(),
       move |data: &mut [f32], _: &_| {
-        if let Ok(mut samples) = out_rx.try_recv() {
-          if samples.len() > data.len() {
-            samples.truncate(data.len());
-          }
+        if let Some(samples) = out_rx.try_iter().last() {
+          let iterator = samples.iter();
+          let iterator = if samples.len() > data.len() {
+            iterator.skip(samples.len() - data.len())
+          } else {
+            iterator.skip(0)
+          };
 
-          for (i, sample) in samples.iter().enumerate() {
+          for (i, sample) in iterator.enumerate() {
             data[i] = *sample;
           }
         }

@@ -1,4 +1,4 @@
-use cpal::{FromSample, Sample, Stream};
+use cpal::Stream;
 use nannou::prelude::*;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -8,18 +8,17 @@ use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{
   samples_fft_to_spectrum, FrequencyLimit, FrequencySpectrum,
 };
-use std::fs::File;
-use std::io::BufWriter;
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender};
 
 struct Model {
   samples: Vec<f32>,
   spectrum: Option<FrequencySpectrum>,
   samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
+  samples_sender: Sender<Vec<f32>>, // Sender to send samples to the callback
   #[allow(dead_code)]
   stream: Stream,
-  writer: WavWriterHandle,
+  #[allow(dead_code)]
+  output_stream: Stream,
 }
 
 fn main() {
@@ -44,7 +43,6 @@ fn model(_: &App) -> Model {
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
   };
-
   let stream = device
     .build_input_stream(
       &config.clone().into(),
@@ -58,29 +56,46 @@ fn model(_: &App) -> Model {
     )
     .unwrap();
 
+  let (out_tx, out_rx) = mpsc::channel::<Vec<f32>>();
+
+  let out_device = host.default_output_device().unwrap();
+  let out_config = out_device.default_output_config().unwrap();
+  let out_stream = out_device
+    .build_output_stream(
+      &out_config.into(),
+      move |data: &mut [f32], _: &_| {
+        if let Ok(samples) = out_rx.try_recv() {
+          for (i, sample) in samples.iter().enumerate() {
+            data[i] = *sample;
+          }
+        }
+      },
+      err_fn,
+      None,
+    )
+    .unwrap();
+
   stream.play().unwrap();
 
   let spec = wav_spec_from_config(&config);
 
   println!("Sample rate: {}", spec.sample_rate);
 
-  let writer = hound::WavWriter::create("out.wav", spec).unwrap();
-
   // Set up your audio stream and provide the sender to the callback here...
   Model {
     samples: Vec::new(),
     spectrum: None,
     samples_receiver: rx,
+    samples_sender: out_tx,
     stream,
-    writer: Arc::new(Mutex::new(Some(writer))),
+    output_stream: out_stream,
   }
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
   while let Ok(new_samples) = model.samples_receiver.try_recv() {
     model.samples.extend(&new_samples);
-
-    write_input_data::<f32, f32>(&new_samples, &model.writer);
+    model.samples_sender.send(new_samples).unwrap();
   }
 
   if model.samples.len() > (44_100 / 60) {
@@ -151,22 +166,5 @@ fn wav_spec_from_config(
     sample_rate: config.sample_rate().0 as _,
     bits_per_sample: (config.sample_format().sample_size() * 8) as _,
     sample_format: sample_format(config.sample_format()),
-  }
-}
-
-type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
-
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
-where
-  T: Sample,
-  U: Sample + hound::Sample + FromSample<T>,
-{
-  if let Ok(mut guard) = writer.try_lock() {
-    if let Some(writer) = guard.as_mut() {
-      for &sample in input.iter() {
-        let sample: U = U::from_sample(sample);
-        writer.write_sample(sample).ok();
-      }
-    }
   }
 }

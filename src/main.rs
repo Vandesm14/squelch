@@ -80,7 +80,7 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
   while let Ok(new_samples) = model.samples_receiver.try_recv() {
     model.samples.extend(&new_samples);
 
-    write_input_data::<f32, i16>(&new_samples, &model.writer);
+    write_input_data::<f32, f32>(&new_samples, &model.writer);
   }
 
   if model.samples.len() > (44_100 / 60) {

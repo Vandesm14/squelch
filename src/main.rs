@@ -11,22 +11,37 @@ use spectrum_analyzer::{
 use std::sync::mpsc::{self, Receiver, Sender};
 
 struct Model {
+  /// Samples from the input device
   samples: Vec<f32>,
+
+  /// Spectrum of the samples
   spectrum: Option<FrequencySpectrum>,
-  samples_receiver: Receiver<Vec<f32>>, // Receiver to get samples from the callback
-  samples_sender: Sender<f32>, // Sender to send samples to the callback
+
+  /// Receiver to get samples from the input device
+  samples_receiver: Receiver<Vec<f32>>,
+
+  /// Sender to send samples to the output device
+  samples_sender: Sender<f32>,
+
+  /// Persist the stream so it doesn't get dropped
   #[allow(dead_code)]
   stream: Stream,
+
+  /// Persist the output stream so it doesn't get dropped
   #[allow(dead_code)]
   output_stream: Stream,
 }
 
 fn main() {
+  // Create the window.
   nannou::app(model).update(update).simple_window(view).run();
 }
 
 fn model(_: &App) -> Model {
+  // Create a channel to get samples from the input device
   let (tx, rx) = mpsc::channel();
+
+  // Create a channel to send samples to the output device
   let (out_tx, out_rx) = mpsc::channel::<f32>();
 
   let err_fn = move |err| {
@@ -35,6 +50,7 @@ fn model(_: &App) -> Model {
 
   let host = cpal::default_host();
 
+  // Create the input stream
   let device = host.default_input_device().unwrap();
   let config = device.default_input_config().unwrap();
   let stream = device
@@ -49,6 +65,10 @@ fn model(_: &App) -> Model {
     )
     .unwrap();
 
+  // Start the stream
+  stream.play().unwrap();
+
+  // Create the output stream
   let out_device = host.default_output_device().unwrap();
   let out_config = out_device.default_output_config().unwrap();
   let out_stream = out_device
@@ -66,12 +86,14 @@ fn model(_: &App) -> Model {
     )
     .unwrap();
 
-  stream.play().unwrap();
+  // Start the output stream
+  out_stream.play().unwrap();
 
+  // Create the spec from the input stream
   let spec = wav_spec_from_config(&config);
-
   println!("Sample rate: {}", spec.sample_rate);
 
+  // Create the model
   Model {
     samples: Vec::new(),
     spectrum: None,
@@ -83,17 +105,23 @@ fn model(_: &App) -> Model {
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
+  // If there are new samples, add them to the model
   while let Ok(new_samples) = model.samples_receiver.try_recv() {
+    // Add the new samples to our model
     model.samples.extend(&new_samples);
+
+    // Send the new samples to the output device
     new_samples
       .iter()
       .for_each(|sample| model.samples_sender.send(*sample).unwrap());
   }
 
+  // Limit the number of samples to 1 second (at 44.1 kHz)
   if model.samples.len() > (44_100 / 60) {
     model.samples = model.samples.split_off(model.samples.len() - 2048);
   }
 
+  // If there are samples, calculate the spectrum
   if !model.samples.is_empty() {
     let spectrum = apply_fft(&model.samples);
     model.spectrum = Some(spectrum);
@@ -124,6 +152,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
   draw.to_frame(app, &frame).unwrap();
 }
 
+/// Apply the FFT to the samples
 fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
   // apply hann window for smoothing; length must be a power of 2 for the FFT
   // 2048 is a good starting point with 44100 kHz
@@ -142,6 +171,7 @@ fn apply_fft(samples: &[f32]) -> FrequencySpectrum {
   .unwrap()
 }
 
+/// Convert a cpal sample format to a hound sample format
 fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
   if format.is_float() {
     hound::SampleFormat::Float
@@ -150,6 +180,7 @@ fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
   }
 }
 
+/// Generate a hound spec from a cpal config
 fn wav_spec_from_config(
   config: &cpal::SupportedStreamConfig,
 ) -> hound::WavSpec {

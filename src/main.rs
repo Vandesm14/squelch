@@ -17,9 +17,6 @@ fn main() {
 }
 
 struct MyEguiApp {
-  /// Samples from the input device
-  samples: Vec<f32>,
-
   /// Receiver to get samples from the input device
   samples_receiver: Receiver<Vec<f32>>,
 
@@ -36,7 +33,7 @@ struct MyEguiApp {
 }
 
 impl MyEguiApp {
-  fn new(cc: &eframe::CreationContext<'_>) -> Self {
+  fn new(_: &eframe::CreationContext<'_>) -> Self {
     let err_fn = move |err| {
       eprintln!("an error occurred on stream: {}", err);
     };
@@ -48,8 +45,7 @@ impl MyEguiApp {
 
     let device = host.default_input_device().unwrap();
     let config = device.default_input_config().unwrap();
-    let spec = wav_spec_from_config(&config);
-    println!("Sample rate: {}", spec.sample_rate);
+    println!("Sample rate: {}", config.sample_rate().0);
 
     let stream = device
       .build_input_stream(
@@ -86,7 +82,6 @@ impl MyEguiApp {
     out_stream.play().unwrap();
 
     MyEguiApp {
-      samples: Vec::new(),
       samples_receiver: rx,
       samples_sender: out_tx,
       stream,
@@ -96,36 +91,15 @@ impl MyEguiApp {
 }
 
 impl eframe::App for MyEguiApp {
-  fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+  fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
     egui::CentralPanel::default().show(ctx, |ui| {
       ui.heading("Hello World!");
     });
 
     while let Ok(new_samples) = self.samples_receiver.try_recv() {
-      self.samples.extend(&new_samples);
-
       new_samples
         .iter()
         .for_each(|sample| self.samples_sender.send(*sample).unwrap());
     }
-  }
-}
-
-fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
-  if format.is_float() {
-    hound::SampleFormat::Float
-  } else {
-    hound::SampleFormat::Int
-  }
-}
-
-fn wav_spec_from_config(
-  config: &cpal::SupportedStreamConfig,
-) -> hound::WavSpec {
-  hound::WavSpec {
-    channels: config.channels() as _,
-    sample_rate: config.sample_rate().0 as _,
-    bits_per_sample: (config.sample_format().sample_size() * 8) as _,
-    sample_format: sample_format(config.sample_format()),
   }
 }

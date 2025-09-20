@@ -1,6 +1,9 @@
-use std::{net::UdpSocket, sync::mpsc::Sender};
+use std::{
+  net::UdpSocket,
+  sync::mpsc::{self, Sender},
+};
 
-use bincode::config::standard;
+use bincode::config::{Configuration, standard};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use eframe::egui::{self, Button, Sense};
@@ -11,9 +14,9 @@ fn main() {
     eprintln!("an error occurred on stream: {}", err);
   };
 
-  let (mic_tx, mic_rx) = std::sync::mpsc::channel::<Vec<f32>>();
-  let (ptt_tx, ptt_rx) = std::sync::mpsc::channel::<bool>();
-  // let (spk_tx, spk_rx) = mpsc::channel::<f32>();
+  let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
+  let (spk_tx, spk_rx) = mpsc::channel::<f32>();
+  let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
 
   let host = cpal::default_host();
 
@@ -38,47 +41,44 @@ fn main() {
 
   mic_stream.play().unwrap();
 
-  // let spk_device = host.default_output_device().unwrap();
-  // let spk_config = spk_device.default_output_config().unwrap();
-  // let spk_stream = spk_device
-  //   .build_output_stream(
-  //     &spk_config.into(),
-  //     move |data: &mut [f32], _: &_| {
-  //       spk_rx.try_iter().take(data.len()).enumerate().for_each(
-  //         |(i, sample)| {
-  //           data[i] = sample;
-  //         },
-  //       );
-  //     },
-  //     err_fn,
-  //     None,
-  //   )
-  //   .unwrap();
+  let spk_device = host.default_output_device().unwrap();
+  let spk_config = spk_device.default_output_config().unwrap();
+  let spk_stream = spk_device
+    .build_output_stream(
+      &spk_config.into(),
+      move |data: &mut [f32], _: &_| {
+        spk_rx.try_iter().take(data.len()).enumerate().for_each(
+          |(i, sample)| {
+            data[i] = sample;
+          },
+        );
+      },
+      err_fn,
+      None,
+    )
+    .unwrap();
 
-  // spk_stream.play().unwrap();
-
-  // Send to headphones.
-  // new_samples
-  //   .iter()
-  //   .for_each(|sample| out_tx.send(*sample).unwrap());
+  spk_stream.play().unwrap();
 
   std::thread::spawn(move || {
+    let mut buf = [0; 1024];
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    socket.set_nonblocking(true).unwrap();
     socket
       .send_to(
         &bincode::encode_to_vec(Packet::Ping, standard()).unwrap(),
         "0.0.0.0:1837",
       )
       .unwrap();
-    let mut ptt = false;
 
+    let mut ptt = false;
     loop {
-      if let Ok(new_ptt) = ptt_rx.recv() {
+      if let Ok(new_ptt) = ptt_rx.try_recv() {
         ptt = new_ptt;
       }
 
       if ptt {
-        match mic_rx.recv() {
+        match mic_rx.try_recv() {
           Ok(new_samples) => {
             for chunk in new_samples.windows(TX_BUFFER_SIZE) {
               let mut buf = [0f32; TX_BUFFER_SIZE];
@@ -93,9 +93,30 @@ fn main() {
                 .unwrap();
             }
           }
-          Err(_) => {
-            eprintln!("Audio receiver disconnected, exiting thread");
-            break;
+          Err(err) => match err {
+            mpsc::TryRecvError::Empty => {}
+            mpsc::TryRecvError::Disconnected => {
+              panic!("Speaker sender disconnected, exiting thread.")
+            }
+          },
+        }
+      } else if socket.recv_from(&mut buf).is_ok() {
+        match bincode::decode_from_slice::<Packet, Configuration>(
+          &buf,
+          bincode::config::standard(),
+        ) {
+          Ok((packet, _)) => match packet {
+            Packet::Ping => todo!(),
+            Packet::Pong => todo!(),
+            Packet::Audio(samples) => {
+              println!("received {} samples", samples.len());
+              for sample in samples {
+                spk_tx.send(sample).unwrap()
+              }
+            }
+          },
+          Err(err) => {
+            eprintln!("Failed to decode packet: {err:?}")
           }
         }
       }

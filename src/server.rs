@@ -1,6 +1,9 @@
-use std::net::{SocketAddr, UdpSocket};
+use std::{
+  collections::HashSet,
+  net::{SocketAddr, UdpSocket},
+};
 
-use bincode::config::Configuration;
+use bincode::config::{Configuration, standard};
 use squelch::Packet;
 
 fn main() -> std::io::Result<()> {
@@ -9,35 +12,34 @@ fn main() -> std::io::Result<()> {
     .set_broadcast(true)
     .expect("set_broadcast to true should succeed");
 
-  let mut clients: Vec<SocketAddr> = Vec::new();
+  let mut clients: HashSet<SocketAddr> = HashSet::new();
 
-  let mut buf = [0u8; 1024]; // Allocate a buffer to receive data
+  let mut buf = [0; 1024];
   loop {
     let (amt, src) = socket.recv_from(&mut buf)?;
-    let received_data = &buf[..amt];
     match bincode::decode_from_slice::<Packet, Configuration>(
-      received_data,
+      &buf,
       bincode::config::standard(),
     ) {
       Ok((packet, _)) => match packet {
-        Packet::Ping => clients.push(src),
+        Packet::Ping => {
+          clients.insert(src);
+          println!("Now {} clients", clients.len());
+        }
         Packet::Pong => todo!(),
-        Packet::Audio(_) => {
-          println!("audio from: {src:?}");
-
+        Packet::Audio(bytes) => {
           for client in clients.iter().filter(|c| **c != src) {
-            socket.send_to(
-              &bincode::encode_to_vec(
-                Packet::Pong,
-                bincode::config::standard(),
+            socket
+              .send_to(
+                &bincode::encode_to_vec(Packet::Audio(bytes), standard())
+                  .unwrap(),
+                client,
               )
-              .unwrap(),
-              client,
-            )?;
+              .unwrap();
           }
         }
       },
-      Err(_) => todo!(),
+      Err(err) => eprintln!("Error decoding packet: {err:?}"),
     }
   }
 }

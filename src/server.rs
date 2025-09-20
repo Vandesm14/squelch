@@ -16,7 +16,7 @@ fn main() -> std::io::Result<()> {
 
   let mut buf = [0; 1024];
   loop {
-    let (amt, src) = socket.recv_from(&mut buf)?;
+    let (_, src) = socket.recv_from(&mut buf)?;
     match bincode::decode_from_slice::<Packet, Configuration>(
       &buf,
       bincode::config::standard(),

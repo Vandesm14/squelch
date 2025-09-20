@@ -1,7 +1,7 @@
 use std::net::{SocketAddr, UdpSocket};
 
 use bincode::config::Configuration;
-use ham_radio_rs::Packet;
+use squelch::Packet;
 
 fn main() -> std::io::Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:1837")?;
@@ -19,10 +19,11 @@ fn main() -> std::io::Result<()> {
       received_data,
       bincode::config::standard(),
     ) {
-      Ok(packet) => {
-        println!("packet: {packet:?}");
-        clients.push(src);
-      }
+      Ok((packet, _)) => match packet {
+        Packet::Ping => clients.push(src),
+        Packet::Pong => todo!(),
+        Packet::Audio(_) => todo!(),
+      },
       Err(_) => todo!(),
     }
 

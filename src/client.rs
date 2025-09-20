@@ -1,10 +1,12 @@
-// use std::sync::mpsc::{self, Receiver, Sender};
+use std::{
+  net::UdpSocket,
+  sync::mpsc::{self},
+};
 
-// use cpal::{
-//   traits::{DeviceTrait, HostTrait, StreamTrait},
-//   Stream,
-// };
-// use eframe::egui;
+use bincode::config::standard;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+use squelch::{Packet, TX_BUFFER_SIZE};
 
 // fn main() {
 //   let native_options = eframe::NativeOptions::default();
@@ -104,18 +106,90 @@
 //   }
 // }
 
-use std::{error::Error, net::UdpSocket};
+fn main() {
+  let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
 
-use ham_radio_rs::Packet;
+  let err_fn = move |err| {
+    eprintln!("an error occurred on stream: {}", err);
+  };
 
-fn main() -> Result<(), Box<dyn Error>> {
-  let socket = UdpSocket::bind("0.0.0.0:0")?;
-  let packet = Packet::Audio([0.0; 16]);
-  let buf =
-    bincode::encode_to_vec(packet, bincode::config::standard()).unwrap();
+  let (tx, rx) = mpsc::channel::<Vec<f32>>();
+  let (out_tx, out_rx) = mpsc::channel::<f32>();
 
-  println!("sent {} bytes.", buf.len());
-  socket.send_to(&buf, "0.0.0.0:1837").unwrap();
+  let host = cpal::default_host();
 
-  Ok(())
+  let device = host.default_input_device().unwrap();
+  let config = device.default_input_config().unwrap();
+  println!("Sample rate: {}", config.sample_rate().0);
+
+  let stream = device
+    .build_input_stream(
+      &config.clone().into(),
+      move |data: &[f32], _: &_| {
+        let data_vec = data.iter().map(|s| s * 10.0).collect::<Vec<_>>();
+
+        tx.send(data_vec).expect("Failed to send samples");
+      },
+      err_fn,
+      None,
+    )
+    .unwrap();
+
+  stream.play().unwrap();
+
+  let out_device = host.default_output_device().unwrap();
+  let out_config = out_device.default_output_config().unwrap();
+  let out_stream = out_device
+    .build_output_stream(
+      &out_config.into(),
+      move |data: &mut [f32], _: &_| {
+        out_rx.try_iter().take(data.len()).enumerate().for_each(
+          |(i, sample)| {
+            data[i] = sample;
+          },
+        );
+      },
+      err_fn,
+      None,
+    )
+    .unwrap();
+
+  out_stream.play().unwrap();
+
+  loop {
+    while let Ok(new_samples) = rx.try_recv() {
+      // Send to headphones.
+      // new_samples
+      //   .iter()
+      //   .for_each(|sample| out_tx.send(*sample).unwrap());
+      for chunk in new_samples.windows(TX_BUFFER_SIZE) {
+        let mut buf = [0f32; TX_BUFFER_SIZE];
+        buf.copy_from_slice(chunk);
+
+        let packet = Packet::Audio(buf);
+        socket
+          .send_to(
+            &bincode::encode_to_vec(packet, standard()).unwrap(),
+            "0.0.0.0:1837",
+          )
+          .unwrap();
+      }
+    }
+  }
 }
+
+// use std::{error::Error, net::UdpSocket};
+
+// use ham_radio_rs::Packet;
+
+// fn main() -> Result<(), Box<dyn Error>> {
+//   let socket = UdpSocket::bind("0.0.0.0:0")?;
+//   let packet = Packet::Audio([0.0; 16]);
+//   let buf =
+//     bincode::encode_to_vec(packet, bincode::config::standard()).unwrap();
+
+//   println!("sent {} bytes.", buf.len());
+//   socket.send_to(&buf, "0.0.0.0:1837").unwrap();
+
+//   Ok(())
+// }

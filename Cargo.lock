@@ -1355,15 +1355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ham-radio-rs"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "cpal",
- "eframe",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2572,6 +2563,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eda41003dc44290527a59b13432d4a0379379fa074b70174882adfbdfd917844"
 dependencies = [
  "bitflags 2.9.4",
+]
+
+[[package]]
+name = "squelch"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "cpal",
+ "eframe",
 ]
 
 [[package]]

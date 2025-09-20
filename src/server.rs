@@ -22,17 +22,22 @@ fn main() -> std::io::Result<()> {
       Ok((packet, _)) => match packet {
         Packet::Ping => clients.push(src),
         Packet::Pong => todo!(),
-        Packet::Audio(_) => todo!(),
+        Packet::Audio(_) => {
+          println!("audio from: {src:?}");
+
+          for client in clients.iter().filter(|c| **c != src) {
+            socket.send_to(
+              &bincode::encode_to_vec(
+                Packet::Pong,
+                bincode::config::standard(),
+              )
+              .unwrap(),
+              client,
+            )?;
+          }
+        }
       },
       Err(_) => todo!(),
-    }
-
-    for client in clients.iter() {
-      socket.send_to(
-        &bincode::encode_to_vec(Packet::Pong, bincode::config::standard())
-          .unwrap(),
-        client,
-      )?;
     }
   }
 }

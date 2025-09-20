@@ -1,195 +1,144 @@
-use std::{
-  net::UdpSocket,
-  sync::mpsc::{self},
-};
+use std::{net::UdpSocket, sync::mpsc::Sender};
 
 use bincode::config::standard;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use eframe::egui::{self, Button, Sense};
 use squelch::{Packet, TX_BUFFER_SIZE};
 
-// fn main() {
-//   let native_options = eframe::NativeOptions::default();
-//   eframe::run_native(
-//     "My egui App",
-//     native_options,
-//     Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc)))),
-//   )
-//   .unwrap();
-// }
-
-// struct MyEguiApp {
-//   /// Receiver to get samples from the input device
-//   samples_receiver: Receiver<Vec<f32>>,
-
-//   /// Sender to send samples to the output device
-//   samples_sender: Sender<f32>,
-
-//   /// Persist the stream so it doesn't get dropped
-//   #[allow(dead_code)]
-//   stream: Stream,
-
-//   /// Persist the output stream so it doesn't get dropped
-//   #[allow(dead_code)]
-//   output_stream: Stream,
-// }
-
-// impl MyEguiApp {
-//   fn new(_: &eframe::CreationContext<'_>) -> Self {
-//     let err_fn = move |err| {
-//       eprintln!("an error occurred on stream: {}", err);
-//     };
-
-//     let (tx, rx) = mpsc::channel();
-//     let (out_tx, out_rx) = mpsc::channel::<f32>();
-
-//     let host = cpal::default_host();
-
-//     let device = host.default_input_device().unwrap();
-//     let config = device.default_input_config().unwrap();
-//     println!("Sample rate: {}", config.sample_rate().0);
-
-//     let stream = device
-//       .build_input_stream(
-//         &config.clone().into(),
-//         move |data: &[f32], _: &_| {
-//           let data_vec = data.iter().map(|s| s * 10.0).collect::<Vec<_>>();
-
-//           tx.send(data_vec).expect("Failed to send samples");
-//         },
-//         err_fn,
-//         None,
-//       )
-//       .unwrap();
-
-//     stream.play().unwrap();
-
-//     let out_device = host.default_output_device().unwrap();
-//     let out_config = out_device.default_output_config().unwrap();
-//     let out_stream = out_device
-//       .build_output_stream(
-//         &out_config.into(),
-//         move |data: &mut [f32], _: &_| {
-//           out_rx.try_iter().take(data.len()).enumerate().for_each(
-//             |(i, sample)| {
-//               data[i] = sample;
-//             },
-//           );
-//         },
-//         err_fn,
-//         None,
-//       )
-//       .unwrap();
-
-//     out_stream.play().unwrap();
-
-//     MyEguiApp {
-//       samples_receiver: rx,
-//       samples_sender: out_tx,
-//       stream,
-//       output_stream: out_stream,
-//     }
-//   }
-// }
-
-// impl eframe::App for MyEguiApp {
-//   fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-//     egui::CentralPanel::default().show(ctx, |ui| {
-//       ui.heading("Hello World!");
-//     });
-
-//     while let Ok(new_samples) = self.samples_receiver.try_recv() {
-//       new_samples
-//         .iter()
-//         .for_each(|sample| self.samples_sender.send(*sample).unwrap());
-//     }
-//   }
-// }
-
 fn main() {
-  let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
   };
 
-  let (tx, rx) = mpsc::channel::<Vec<f32>>();
-  let (out_tx, out_rx) = mpsc::channel::<f32>();
+  let (mic_tx, mic_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+  let (ptt_tx, ptt_rx) = std::sync::mpsc::channel::<bool>();
+  // let (spk_tx, spk_rx) = mpsc::channel::<f32>();
 
   let host = cpal::default_host();
 
-  let device = host.default_input_device().unwrap();
-  let config = device.default_input_config().unwrap();
-  println!("Sample rate: {}", config.sample_rate().0);
+  let mic_device = host.default_input_device().unwrap();
+  let mic_config = mic_device.default_input_config().unwrap();
+  println!("Sample rate: {}", mic_config.sample_rate().0);
 
-  let stream = device
+  let mic_stream = mic_device
     .build_input_stream(
-      &config.clone().into(),
+      &mic_config.clone().into(),
       move |data: &[f32], _: &_| {
         let data_vec = data.iter().map(|s| s * 10.0).collect::<Vec<_>>();
 
-        tx.send(data_vec).expect("Failed to send samples");
+        if let Err(err) = mic_tx.send(data_vec) {
+          eprintln!("Failed to send samples: {err:?}");
+        }
       },
       err_fn,
       None,
     )
     .unwrap();
 
-  stream.play().unwrap();
+  mic_stream.play().unwrap();
 
-  let out_device = host.default_output_device().unwrap();
-  let out_config = out_device.default_output_config().unwrap();
-  let out_stream = out_device
-    .build_output_stream(
-      &out_config.into(),
-      move |data: &mut [f32], _: &_| {
-        out_rx.try_iter().take(data.len()).enumerate().for_each(
-          |(i, sample)| {
-            data[i] = sample;
-          },
-        );
-      },
-      err_fn,
-      None,
-    )
-    .unwrap();
+  // let spk_device = host.default_output_device().unwrap();
+  // let spk_config = spk_device.default_output_config().unwrap();
+  // let spk_stream = spk_device
+  //   .build_output_stream(
+  //     &spk_config.into(),
+  //     move |data: &mut [f32], _: &_| {
+  //       spk_rx.try_iter().take(data.len()).enumerate().for_each(
+  //         |(i, sample)| {
+  //           data[i] = sample;
+  //         },
+  //       );
+  //     },
+  //     err_fn,
+  //     None,
+  //   )
+  //   .unwrap();
 
-  out_stream.play().unwrap();
+  // spk_stream.play().unwrap();
 
-  loop {
-    while let Ok(new_samples) = rx.try_recv() {
-      // Send to headphones.
-      // new_samples
-      //   .iter()
-      //   .for_each(|sample| out_tx.send(*sample).unwrap());
-      for chunk in new_samples.windows(TX_BUFFER_SIZE) {
-        let mut buf = [0f32; TX_BUFFER_SIZE];
-        buf.copy_from_slice(chunk);
+  // Send to headphones.
+  // new_samples
+  //   .iter()
+  //   .for_each(|sample| out_tx.send(*sample).unwrap());
 
-        let packet = Packet::Audio(buf);
-        socket
-          .send_to(
-            &bincode::encode_to_vec(packet, standard()).unwrap(),
-            "0.0.0.0:1837",
-          )
-          .unwrap();
+  std::thread::spawn(move || {
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    socket
+      .send_to(
+        &bincode::encode_to_vec(Packet::Ping, standard()).unwrap(),
+        "0.0.0.0:1837",
+      )
+      .unwrap();
+    let mut ptt = false;
+
+    loop {
+      if let Ok(new_ptt) = ptt_rx.recv() {
+        ptt = new_ptt;
       }
+
+      if ptt {
+        match mic_rx.recv() {
+          Ok(new_samples) => {
+            for chunk in new_samples.windows(TX_BUFFER_SIZE) {
+              let mut buf = [0f32; TX_BUFFER_SIZE];
+              buf.copy_from_slice(chunk);
+
+              socket
+                .send_to(
+                  &bincode::encode_to_vec(Packet::Audio(buf), standard())
+                    .unwrap(),
+                  "0.0.0.0:1837",
+                )
+                .unwrap();
+            }
+          }
+          Err(_) => {
+            eprintln!("Audio receiver disconnected, exiting thread");
+            break;
+          }
+        }
+      }
+    }
+  });
+
+  let native_options = eframe::NativeOptions::default();
+  eframe::run_native(
+    "Squelch",
+    native_options,
+    Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc, ptt_tx)))),
+  )
+  .unwrap();
+}
+
+struct MyEguiApp {
+  ptt_sender: Sender<bool>,
+  ptt: bool,
+}
+
+impl MyEguiApp {
+  fn new(_: &eframe::CreationContext<'_>, ptt_sender: Sender<bool>) -> Self {
+    MyEguiApp {
+      ptt_sender,
+      ptt: false,
     }
   }
 }
 
-// use std::{error::Error, net::UdpSocket};
+impl eframe::App for MyEguiApp {
+  fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+      ui.heading("Hello World!");
+      ui.label(format!("PTT: {}", self.ptt));
 
-// use ham_radio_rs::Packet;
-
-// fn main() -> Result<(), Box<dyn Error>> {
-//   let socket = UdpSocket::bind("0.0.0.0:0")?;
-//   let packet = Packet::Audio([0.0; 16]);
-//   let buf =
-//     bincode::encode_to_vec(packet, bincode::config::standard()).unwrap();
-
-//   println!("sent {} bytes.", buf.len());
-//   socket.send_to(&buf, "0.0.0.0:1837").unwrap();
-
-//   Ok(())
-// }
+      let response = ui.add(Button::new("PTT").sense(Sense::drag()));
+      if response.drag_started() {
+        self.ptt = true;
+        self.ptt_sender.send(self.ptt).unwrap();
+      } else if response.drag_stopped() {
+        self.ptt = false;
+        self.ptt_sender.send(self.ptt).unwrap();
+      }
+    });
+  }
+}

@@ -13,5 +13,8 @@ path = "src/client.rs"
 
 [dependencies]
 bincode = "2.0"
+biquad = "0.5.0"
 cpal = "0.16"
 eframe = "0.32"
+lowpass-filter = "0.4.1"
+turborand = "0.10.1"

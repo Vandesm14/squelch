@@ -1,7 +1,7 @@
 procs:
-  server:
-    cmd: ['cargo', 'run', '--bin', 'server']
   client:
+    cmd: ['cargo', 'run', '--bin', 'client']
+  client2:
     cmd: ['cargo', 'run', '--bin', 'client']
 
 hide_keymap_window: true

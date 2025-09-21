@@ -8,6 +8,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use eframe::egui::{self, Button, Sense};
 use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
+use turborand::{TurboRand, rng::Rng};
 
 fn main() {
   let err_fn = move |err| {
@@ -48,7 +49,6 @@ fn main() {
           buf.extend(samples);
         });
         if !buf.is_empty() {
-          println!("buf: {}, data: {}", buf.len(), data.len());
           let take = data.len().min(buf.len());
           buf
             .iter()
@@ -79,6 +79,8 @@ fn main() {
         "0.0.0.0:1837",
       )
       .unwrap();
+
+    let mut rng = Rng::new();
 
     let mut ptt = false;
     loop {
@@ -117,7 +119,21 @@ fn main() {
           Ok((packet, _)) => match packet {
             Packet::Ping => todo!(),
             Packet::Pong => todo!(),
-            Packet::Audio(samples) => {
+            Packet::Audio(mut samples) => {
+              let cutoff: f32 = 400.0;
+              let mut noise = [0f32; TX_BUFFER_SIZE];
+              for s in noise.iter_mut() {
+                *s = rng.f32() * 0.06;
+              }
+              // lowpass_filter::lowpass_filter(&mut noise, 44100.0, cutoff);
+              let atten = 0.001;
+              for (s, n) in samples.iter_mut().zip(noise.iter()) {
+                *s *= 2.0;
+                *s = s.clamp(-atten, atten) * (0.1 / atten);
+                *s += n;
+                *s = s.clamp(-1.0, 1.0);
+              }
+              lowpass_filter::lowpass_filter(&mut samples, 44100.0, cutoff);
               spk_tx.send(samples.to_vec()).unwrap();
             }
           },

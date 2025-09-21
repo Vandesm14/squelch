@@ -147,21 +147,20 @@ fn main() {
             Packet::Ping => todo!(),
             Packet::Pong => todo!(),
             Packet::Audio(mut samples) => {
-              let cutoff: f32 = 400.0;
               let mut noise = [0f32; TX_BUFFER_SIZE];
               for s in noise.iter_mut() {
-                *s = rng.f32() * 0.05;
+                *s = rng.f32() * 0.1;
               }
-              lowpass_filter::lowpass_filter(&mut noise, 44100.0, cutoff);
-              let atten = 0.01;
+              lowpass_filter::lowpass_filter(&mut noise, 44100.0, 600.0);
+              let atten = 0.02;
               for (s, n) in samples.iter_mut().zip(noise.iter()) {
                 *s *= 2.0;
-                *s = s.clamp(-atten, atten) * (0.1 / atten);
+                *s = s.clamp(-atten, atten) * (0.2 / atten);
                 *s += n;
                 *s = s.clamp(-1.0, 1.0);
               }
 
-              let f0 = 2000.hz();
+              let f0 = 4000.hz();
               let fs = 44100.hz();
               let coeffs = Coefficients::<f32>::from_params(
                 Type::LowPass,

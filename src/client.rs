@@ -169,7 +169,7 @@ fn main() {
                 }
                 let atten = 0.01;
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
-                  // *s *= 4.0;
+                  *s *= 4.0;
                   // *s = s.clamp(-atten, atten) * (0.4 / atten);
                   // *s += n * 0.35;
                   // *s = s.clamp(-1.0, 1.0);

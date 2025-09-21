@@ -7,6 +7,5 @@ pub const MAX_PACKET_SIZE: usize = 4 * TX_BUFFER_SIZE + 8;
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
   Ping,
-  Pong,
   Audio([f32; TX_BUFFER_SIZE]),
 }

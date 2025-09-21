@@ -26,7 +26,6 @@ fn main() -> std::io::Result<()> {
           clients.insert(src);
           println!("Now {} clients", clients.len());
         }
-        Packet::Pong => todo!(),
         Packet::Audio(bytes) => {
           for client in clients.iter().filter(|c| **c != src) {
             socket

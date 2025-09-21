@@ -145,7 +145,6 @@ fn main() {
         ) {
           Ok((packet, _)) => match packet {
             Packet::Ping => todo!(),
-            Packet::Pong => todo!(),
             Packet::Audio(mut samples) => {
               let mut noise = [0f32; TX_BUFFER_SIZE];
               for s in noise.iter_mut() {

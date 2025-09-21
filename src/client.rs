@@ -55,7 +55,7 @@ fn main() {
     eprintln!("an error occurred on stream: {}", err);
   };
 
-  let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
+  let (mic_tx, mic_rx) = mpsc::channel::<(Vec<f32>)>();
   let (spk_tx, spk_rx) = mpsc::channel::<[f32; TX_BUFFER_SIZE]>();
   let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
 
@@ -121,8 +121,8 @@ fn main() {
     .unwrap();
 
     let rng = Rng::new();
-    let mut jitter_buffer: JitterBuffer<[f32; TX_BUFFER_SIZE]> =
-      JitterBuffer::new(16);
+    // let mut jitter_buffer: JitterBuffer<[f32; TX_BUFFER_SIZE]> =
+    //   JitterBuffer::new(16);
 
     let mut ptt = false;
     loop {
@@ -196,11 +196,11 @@ fn main() {
                 }
               }
 
-              if let Some(chunks) = jitter_buffer.push_and_drain(samples) {
-                for chunk in chunks {
-                  spk_tx.send(chunk).unwrap();
-                }
-              }
+              // if let Some(chunks) = jitter_buffer.push_and_drain(samples) {
+              // for chunk in chunks {
+              spk_tx.send(samples).unwrap();
+              // }
+              // }
             }
           },
           Err(err) => {

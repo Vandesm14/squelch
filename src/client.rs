@@ -1,17 +1,41 @@
 use std::{
-  net::UdpSocket,
+  net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
   sync::mpsc::{self, Sender},
 };
 
 use bincode::config::{Configuration, standard};
 use biquad::*;
+use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
 use turborand::{TurboRand, rng::Rng};
 
 use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 
+#[derive(Parser)]
+pub struct Cli {
+  /// The socket IPv4 address to bind the WebSocket server to.
+  #[arg(short, long, default_value = None)]
+  pub address: Option<SocketAddr>,
+}
+
+pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
+  match result {
+    Ok(_) => std::io::Result::Ok(()),
+    Err(e) => match e.kind() {
+      std::io::ErrorKind::WouldBlock => Ok(()),
+      _ => Err(e),
+    },
+  }
+}
+
 fn main() {
+  let args = Cli::parse();
+
+  let address = args.address.unwrap_or_else(|| {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 1837))
+  });
+
   let err_fn = move |err| {
     eprintln!("an error occurred on stream: {}", err);
   };
@@ -74,14 +98,13 @@ fn main() {
     let mut buf = [0; MAX_PACKET_SIZE];
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.set_nonblocking(true).unwrap();
-    socket
-      .send_to(
-        &bincode::encode_to_vec(Packet::Ping, standard()).unwrap(),
-        "0.0.0.0:1837",
-      )
-      .unwrap();
+    map_would_block(socket.send_to(
+      &bincode::encode_to_vec(Packet::Ping, standard()).unwrap(),
+      address,
+    ))
+    .unwrap();
 
-    let mut rng = Rng::new();
+    let rng = Rng::new();
 
     let mut ptt = false;
     loop {
@@ -96,13 +119,14 @@ fn main() {
               let mut buf = [0f32; TX_BUFFER_SIZE];
               buf.copy_from_slice(chunk);
 
-              socket
-                .send_to(
+              map_would_block(
+                socket.send_to(
                   &bincode::encode_to_vec(Packet::Audio(buf), standard())
                     .unwrap(),
-                  "0.0.0.0:1837",
-                )
-                .unwrap();
+                  address,
+                ),
+              )
+              .unwrap();
             }
           }
           Err(err) => match err {

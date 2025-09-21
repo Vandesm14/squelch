@@ -8,6 +8,10 @@ use biquad::*;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
+use global_hotkey::{
+  GlobalHotKeyEvent, GlobalHotKeyManager,
+  hotkey::{Code, HotKey},
+};
 use turborand::{TurboRand, rng::Rng};
 
 use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, jitter::JitterBuffer};
@@ -19,6 +23,10 @@ pub struct Cli {
   /// The socket IPv4 address to bind the WebSocket server to.
   #[arg(short, long, default_value = None)]
   pub address: Option<SocketAddr>,
+
+  /// Whether to register the hotkey (hard-coded to PauseBreak right now).
+  #[arg(long)]
+  pub hotkey: bool,
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
@@ -189,6 +197,30 @@ fn main() {
       }
     }
   });
+
+  if args.hotkey {
+    println!("Using hotkey.");
+
+    let manager = GlobalHotKeyManager::new().unwrap();
+    let hotkey = HotKey::new(None, Code::Pause);
+    manager.register(hotkey).unwrap();
+
+    let hotkey_ptt_tx = ptt_tx.clone();
+    loop {
+      if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
+        println!("hotkey event: {event:?}");
+
+        match event.state {
+          global_hotkey::HotKeyState::Pressed => {
+            hotkey_ptt_tx.send(true).unwrap()
+          }
+          global_hotkey::HotKeyState::Released => {
+            hotkey_ptt_tx.send(false).unwrap()
+          }
+        }
+      }
+    }
+  }
 
   let native_options = eframe::NativeOptions::default();
   eframe::run_native(

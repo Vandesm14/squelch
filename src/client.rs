@@ -18,7 +18,7 @@ use turborand::{TurboRand, rng::Rng};
 use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, jitter::JitterBuffer};
 
 /// Squelch
-#[derive(Parser, Debug)]
+#[derive(Debug, Clone, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
   /// The socket IPv4 address to bind the WebSocket server to.
@@ -28,6 +28,10 @@ pub struct Cli {
   /// Registers a PTT key via key string (see https://docs.rs/global-hotkey/latest/global_hotkey/hotkey/enum.Code.html).
   #[arg(long)]
   pub hotkey: Option<String>,
+
+  /// Disables effects.
+  #[arg(long)]
+  pub no_fx: bool,
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
@@ -105,6 +109,7 @@ fn main() {
 
   spk_stream.play().unwrap();
 
+  let thread_args = args.clone();
   std::thread::spawn(move || {
     let mut buf = [0; MAX_PACKET_SIZE];
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
@@ -157,31 +162,38 @@ fn main() {
           Ok((packet, _)) => match packet {
             Packet::Ping => todo!(),
             Packet::Audio(mut samples) => {
-              let mut noise = [0f32; TX_BUFFER_SIZE];
-              for s in noise.iter_mut() {
-                *s = rng.f32() * 0.1;
-              }
-              lowpass_filter::lowpass_filter(&mut noise, 44100.0, 600.0);
-              let atten = 0.02;
-              for (s, n) in samples.iter_mut().zip(noise.iter()) {
-                *s *= 2.0;
-                *s = s.clamp(-atten, atten) * (0.2 / atten);
-                *s += n;
-                *s = s.clamp(-1.0, 1.0);
-              }
+              if !thread_args.no_fx {
+                let mut noise = [0f32; TX_BUFFER_SIZE];
+                for s in noise.iter_mut() {
+                  *s = rng.f32() * 0.1;
+                }
+                lowpass_filter::lowpass_filter(&mut noise, 44100.0, 600.0);
+                let atten = 0.02;
+                for (s, n) in samples.iter_mut().zip(noise.iter()) {
+                  *s *= 2.0;
+                  *s = s.clamp(-atten, atten) * (0.2 / atten);
+                  *s += n;
+                  *s = s.clamp(-1.0, 1.0);
+                }
 
-              let f0 = 4000.hz();
-              let fs = 44100.hz();
-              let coeffs = Coefficients::<f32>::from_params(
-                Type::LowPass,
-                fs,
-                f0,
-                Q_BUTTERWORTH_F32,
-              )
-              .unwrap();
-              let mut lowpass = DirectForm1::<f32>::new(coeffs);
-              for s in samples.iter_mut() {
-                *s = lowpass.run(*s);
+                let f0 = 4000.hz();
+                let fs = 44100.hz();
+                let coeffs = Coefficients::<f32>::from_params(
+                  Type::LowPass,
+                  fs,
+                  f0,
+                  Q_BUTTERWORTH_F32,
+                )
+                .unwrap();
+                let mut lowpass = DirectForm1::<f32>::new(coeffs);
+                for s in samples.iter_mut() {
+                  *s = lowpass.run(*s);
+                }
+              } else {
+                for s in samples.iter_mut() {
+                  *s *= 4.0;
+                  *s = s.clamp(-1.0, 1.0);
+                }
               }
 
               if let Some(chunks) = jitter_buffer.push_and_drain(samples) {

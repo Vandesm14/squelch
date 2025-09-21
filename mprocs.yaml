@@ -1,6 +1,6 @@
 procs:
   client:
-    cmd: ['cargo', 'run', '--bin', 'client']
+    cmd: ['cargo', 'run', '--bin', 'client', '--', '--no-fx']
   client2:
     cmd: ['cargo', 'run', '--bin', 'client', '--', '--hotkey', 'Pause']
 

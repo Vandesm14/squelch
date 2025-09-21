@@ -2,6 +2,6 @@ procs:
   client:
     cmd: ['cargo', 'run', '--bin', 'client']
   client2:
-    cmd: ['cargo', 'run', '--bin', 'client', '--', '--hotkey']
+    cmd: ['cargo', 'run', '--bin', 'client', '--', '--hotkey', 'Pause']
 
 hide_keymap_window: true

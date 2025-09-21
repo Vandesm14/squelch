@@ -1,5 +1,6 @@
 use std::{
   net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+  str::FromStr,
   sync::mpsc::{self, Sender},
 };
 
@@ -24,9 +25,9 @@ pub struct Cli {
   #[arg(short, long, default_value = None)]
   pub address: Option<SocketAddr>,
 
-  /// Whether to register the hotkey (hard-coded to PauseBreak right now).
+  /// Registers a PTT key via key string (see https://docs.rs/global-hotkey/latest/global_hotkey/hotkey/enum.Code.html).
   #[arg(long)]
-  pub hotkey: bool,
+  pub hotkey: Option<String>,
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
@@ -198,18 +199,20 @@ fn main() {
     }
   });
 
-  if args.hotkey {
+  if let Some(key) = args.hotkey {
     println!("Using hotkey.");
 
+    let code = Code::from_str(&key).unwrap();
+
     let manager = GlobalHotKeyManager::new().unwrap();
-    let hotkey = HotKey::new(None, Code::Pause);
+    let hotkey = HotKey::new(None, code);
     manager.register(hotkey).unwrap();
 
     let hotkey_ptt_tx = ptt_tx.clone();
     loop {
-      if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-        println!("hotkey event: {event:?}");
-
+      if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv()
+        && event.id == code as u32
+      {
         match event.state {
           global_hotkey::HotKeyState::Pressed => {
             hotkey_ptt_tx.send(true).unwrap()

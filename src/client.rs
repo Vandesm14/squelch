@@ -5,7 +5,6 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
-use biquad::*;
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
@@ -13,9 +12,9 @@ use global_hotkey::{
   GlobalHotKeyEvent, GlobalHotKeyManager,
   hotkey::{Code, HotKey},
 };
-use turborand::{TurboRand, rng::Rng};
+use noise::{Fbm, NoiseFn};
 
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, jitter::JitterBuffer};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 
 /// Squelch
 #[derive(Debug, Clone, Parser)]
@@ -55,7 +54,7 @@ fn main() {
     eprintln!("an error occurred on stream: {}", err);
   };
 
-  let (mic_tx, mic_rx) = mpsc::channel::<(Vec<f32>)>();
+  let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
   let (spk_tx, spk_rx) = mpsc::channel::<[f32; TX_BUFFER_SIZE]>();
   let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
 
@@ -89,6 +88,7 @@ fn main() {
           buf.extend(samples);
         });
         if !buf.is_empty() {
+          println!("buf: {}", buf.len());
           let take = data.len().min(buf.len());
           buf
             .iter()
@@ -120,9 +120,8 @@ fn main() {
     ))
     .unwrap();
 
-    let rng = Rng::new();
-    // let mut jitter_buffer: JitterBuffer<[f32; TX_BUFFER_SIZE]> =
-    //   JitterBuffer::new(16);
+    let mut noise_idx = 0.0f64;
+    let noiser: Fbm<noise::Worley> = noise::Fbm::new(0);
 
     let mut ptt = false;
     loop {
@@ -165,30 +164,17 @@ fn main() {
               if !thread_args.no_fx {
                 let mut noise = [0f32; TX_BUFFER_SIZE];
                 for s in noise.iter_mut() {
-                  *s = rng.f32() * 0.1;
+                  *s = noiser.get([noise_idx, noise_idx]) as f32;
+                  noise_idx += 0.005;
                 }
-                lowpass_filter::lowpass_filter(&mut noise, 44100.0, 600.0);
-                let atten = 0.02;
+                let atten = 0.01;
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
-                  *s *= 2.0;
-                  *s = s.clamp(-atten, atten) * (0.2 / atten);
-                  *s += n;
+                  *s *= 4.0;
+                  *s = s.clamp(-atten, atten) * (0.4 / atten);
+                  *s += n * 0.35;
                   *s = s.clamp(-1.0, 1.0);
                 }
-
-                let f0 = 4000.hz();
-                let fs = 44100.hz();
-                let coeffs = Coefficients::<f32>::from_params(
-                  Type::LowPass,
-                  fs,
-                  f0,
-                  Q_BUTTERWORTH_F32,
-                )
-                .unwrap();
-                let mut lowpass = DirectForm1::<f32>::new(coeffs);
-                for s in samples.iter_mut() {
-                  *s = lowpass.run(*s);
-                }
+                lowpass_filter::lowpass_filter(&mut samples, 44100.0, 700.0);
               } else {
                 for s in samples.iter_mut() {
                   *s *= 4.0;

@@ -4,7 +4,7 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
-use squelch::Packet;
+use squelch::{MAX_PACKET_SIZE, Packet};
 
 fn main() -> std::io::Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:1837")?;
@@ -14,7 +14,7 @@ fn main() -> std::io::Result<()> {
 
   let mut clients: HashSet<SocketAddr> = HashSet::new();
 
-  let mut buf = [0; 1024];
+  let mut buf = [0; MAX_PACKET_SIZE];
   loop {
     let (_, src) = socket.recv_from(&mut buf)?;
     match bincode::decode_from_slice::<Packet, Configuration>(

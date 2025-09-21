@@ -7,7 +7,7 @@ use bincode::config::{Configuration, standard};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use eframe::egui::{self, Button, Sense};
-use squelch::{Packet, TX_BUFFER_SIZE};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 
 fn main() {
   let err_fn = move |err| {
@@ -15,7 +15,7 @@ fn main() {
   };
 
   let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
-  let (spk_tx, spk_rx) = mpsc::channel::<f32>();
+  let (spk_tx, spk_rx) = mpsc::channel::<Vec<f32>>();
   let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
 
   let host = cpal::default_host();
@@ -28,11 +28,7 @@ fn main() {
     .build_input_stream(
       &mic_config.clone().into(),
       move |data: &[f32], _: &_| {
-        let data_vec = data.iter().map(|s| s * 10.0).collect::<Vec<_>>();
-
-        if let Err(err) = mic_tx.send(data_vec) {
-          eprintln!("Failed to send samples: {err:?}");
-        }
+        mic_tx.send(data.to_vec()).unwrap();
       },
       err_fn,
       None,
@@ -43,15 +39,28 @@ fn main() {
 
   let spk_device = host.default_output_device().unwrap();
   let spk_config = spk_device.default_output_config().unwrap();
+  let mut buf = Vec::with_capacity(TX_BUFFER_SIZE);
   let spk_stream = spk_device
     .build_output_stream(
       &spk_config.into(),
       move |data: &mut [f32], _: &_| {
-        spk_rx.try_iter().take(data.len()).enumerate().for_each(
-          |(i, sample)| {
-            data[i] = sample;
-          },
-        );
+        spk_rx.try_iter().for_each(|samples| {
+          buf.extend(samples);
+        });
+        if !buf.is_empty() {
+          println!("buf: {}, data: {}", buf.len(), data.len());
+          let take = data.len().min(buf.len());
+          buf
+            .iter()
+            .enumerate()
+            .take(take)
+            .for_each(|(i, s)| data[i] = *s);
+          buf.drain(0..take);
+        } else {
+          for item in data.iter_mut() {
+            *item = 0.0;
+          }
+        }
       },
       err_fn,
       None,
@@ -61,7 +70,7 @@ fn main() {
   spk_stream.play().unwrap();
 
   std::thread::spawn(move || {
-    let mut buf = [0; 1024];
+    let mut buf = [0; MAX_PACKET_SIZE];
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.set_nonblocking(true).unwrap();
     socket
@@ -80,7 +89,7 @@ fn main() {
       if ptt {
         match mic_rx.try_recv() {
           Ok(new_samples) => {
-            for chunk in new_samples.windows(TX_BUFFER_SIZE) {
+            for chunk in new_samples.chunks_exact(TX_BUFFER_SIZE) {
               let mut buf = [0f32; TX_BUFFER_SIZE];
               buf.copy_from_slice(chunk);
 
@@ -109,10 +118,7 @@ fn main() {
             Packet::Ping => todo!(),
             Packet::Pong => todo!(),
             Packet::Audio(samples) => {
-              println!("received {} samples", samples.len());
-              for sample in samples {
-                spk_tx.send(sample).unwrap()
-              }
+              spk_tx.send(samples.to_vec()).unwrap();
             }
           },
           Err(err) => {

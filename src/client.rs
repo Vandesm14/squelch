@@ -12,7 +12,9 @@ use turborand::{TurboRand, rng::Rng};
 
 use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 
-#[derive(Parser)]
+/// Squelch
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
 pub struct Cli {
   /// The socket IPv4 address to bind the WebSocket server to.
   #[arg(short, long, default_value = None)]

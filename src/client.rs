@@ -4,11 +4,12 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
+use biquad::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
 use eframe::egui::{self, Button, Sense};
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 use turborand::{TurboRand, rng::Rng};
+
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
 
 fn main() {
   let err_fn = move |err| {
@@ -123,17 +124,30 @@ fn main() {
               let cutoff: f32 = 400.0;
               let mut noise = [0f32; TX_BUFFER_SIZE];
               for s in noise.iter_mut() {
-                *s = rng.f32() * 0.06;
+                *s = rng.f32() * 0.05;
               }
-              // lowpass_filter::lowpass_filter(&mut noise, 44100.0, cutoff);
-              let atten = 0.001;
+              lowpass_filter::lowpass_filter(&mut noise, 44100.0, cutoff);
+              let atten = 0.01;
               for (s, n) in samples.iter_mut().zip(noise.iter()) {
                 *s *= 2.0;
                 *s = s.clamp(-atten, atten) * (0.1 / atten);
                 *s += n;
                 *s = s.clamp(-1.0, 1.0);
               }
-              lowpass_filter::lowpass_filter(&mut samples, 44100.0, cutoff);
+              // Cutoff and sampling frequencies
+              let f0 = 2000.hz();
+              let fs = 44100.hz();
+              let coeffs = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                fs,
+                f0,
+                Q_BUTTERWORTH_F32,
+              )
+              .unwrap();
+              let mut lowpass = DirectForm1::<f32>::new(coeffs);
+              for s in samples.iter_mut() {
+                *s = lowpass.run(*s);
+              }
               spk_tx.send(samples.to_vec()).unwrap();
             }
           },

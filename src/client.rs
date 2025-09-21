@@ -134,7 +134,7 @@ fn main() {
                 *s += n;
                 *s = s.clamp(-1.0, 1.0);
               }
-              // Cutoff and sampling frequencies
+
               let f0 = 2000.hz();
               let fs = 44100.hz();
               let coeffs = Coefficients::<f32>::from_params(
@@ -148,6 +148,7 @@ fn main() {
               for s in samples.iter_mut() {
                 *s = lowpass.run(*s);
               }
+
               spk_tx.send(samples.to_vec()).unwrap();
             }
           },

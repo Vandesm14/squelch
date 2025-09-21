@@ -10,7 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
 use turborand::{TurboRand, rng::Rng};
 
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, jitter::JitterBuffer};
 
 /// Squelch
 #[derive(Parser, Debug)]
@@ -43,7 +43,7 @@ fn main() {
   };
 
   let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
-  let (spk_tx, spk_rx) = mpsc::channel::<Vec<f32>>();
+  let (spk_tx, spk_rx) = mpsc::channel::<[f32; TX_BUFFER_SIZE]>();
   let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
 
   let host = cpal::default_host();
@@ -107,6 +107,8 @@ fn main() {
     .unwrap();
 
     let rng = Rng::new();
+    let mut jitter_buffer: JitterBuffer<[f32; TX_BUFFER_SIZE]> =
+      JitterBuffer::new(16);
 
     let mut ptt = false;
     loop {
@@ -173,7 +175,11 @@ fn main() {
                 *s = lowpass.run(*s);
               }
 
-              spk_tx.send(samples.to_vec()).unwrap();
+              if let Some(chunks) = jitter_buffer.push_and_drain(samples) {
+                for chunk in chunks {
+                  spk_tx.send(chunk).unwrap();
+                }
+              }
             }
           },
           Err(err) => {

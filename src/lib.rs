@@ -1,3 +1,5 @@
+pub mod jitter;
+
 use bincode::{Decode, Encode};
 
 pub const TX_BUFFER_SIZE: usize = 256;

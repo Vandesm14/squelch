@@ -37,7 +37,7 @@ pub struct Cli {
   pub no_fx: bool,
 
   /// Threshold of distortion effect.
-  #[arg(short, long, default_value_t = 0.02)]
+  #[arg(short, long, default_value_t = 0.05)]
   pub distortion: f32,
 
   /// Gain multiplier for incoming signal.
@@ -79,26 +79,19 @@ fn main() {
   let spk_config = cpal::SupportedStreamConfig::new(
     1,
     cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range {
-      min: 44100 * 1,
-      max: 44100 * 1,
-    },
+    cpal::SupportedBufferSize::Range { min: 256, max: 256 },
     cpal::SampleFormat::F32,
   );
 
   let mic_config = cpal::SupportedStreamConfig::new(
     1,
     cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range {
-      min: 44100 * 1,
-      max: 44100 * 1,
-    },
+    cpal::SupportedBufferSize::Range { min: 256, max: 256 },
     cpal::SampleFormat::F32,
   );
 
   let mic_device = host.default_input_device().unwrap();
-  // let mic_config = mic_device.default_input_config().unwrap();
-  println!("Sample rate: {}", mic_config.sample_rate().0);
+  println!("mic config: {mic_config:?}");
 
   let mic_stream = mic_device
     .build_input_stream(
@@ -114,7 +107,7 @@ fn main() {
   mic_stream.play().unwrap();
 
   let spk_device = host.default_output_device().unwrap();
-  // let spk_config = spk_device.default_output_config().unwrap();
+  println!("spk config: {spk_config:?}");
   let mut buf = VecDeque::with_capacity(TX_BUFFER_SIZE);
   let spk_stream = spk_device
     .build_output_stream(

@@ -5,6 +5,9 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
+use biquad::{
+  Biquad, Coefficients, DirectForm1, Q_BUTTERWORTH_F32, ToHertz, Type,
+};
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
@@ -123,6 +126,28 @@ fn main() {
     let mut noise_idx = 0.0f64;
     let noiser: Fbm<noise::Worley> = noise::Fbm::new(0);
 
+    let f0 = 3000.hz();
+    let fs = 44100.hz();
+    let coeffs = Coefficients::<f32>::from_params(
+      Type::LowPass,
+      fs,
+      f0,
+      Q_BUTTERWORTH_F32,
+    )
+    .unwrap();
+    let mut lowpass = DirectForm1::<f32>::new(coeffs);
+
+    let f0 = 300.hz();
+    let fs = 44100.hz();
+    let coeffs = Coefficients::<f32>::from_params(
+      Type::HighPass,
+      fs,
+      f0,
+      Q_BUTTERWORTH_F32,
+    )
+    .unwrap();
+    let mut highpass = DirectForm1::<f32>::new(coeffs);
+
     let mut ptt = false;
     loop {
       if let Ok(new_ptt) = ptt_rx.try_recv() {
@@ -170,9 +195,9 @@ fn main() {
                 let atten = 0.01;
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
                   *s *= 4.0;
-                  // *s = s.clamp(-atten, atten) * (0.4 / atten);
-                  // *s += n * 0.35;
-                  // *s = s.clamp(-1.0, 1.0);
+                  *s = s.clamp(-atten, atten) * (0.4 / atten);
+                  *s += n * 0.3;
+                  *s = s.clamp(-1.0, 1.0);
                 }
                 lowpass_filter::lowpass_filter(&mut samples, 44100.0, 700.0);
               } else {
@@ -182,11 +207,12 @@ fn main() {
                 }
               }
 
-              // if let Some(chunks) = jitter_buffer.push_and_drain(samples) {
-              // for chunk in chunks {
+              for s in samples.iter_mut() {
+                *s = lowpass.run(*s);
+                *s = highpass.run(*s);
+              }
+
               spk_tx.send(samples).unwrap();
-              // }
-              // }
             }
           },
           Err(err) => {

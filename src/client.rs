@@ -35,6 +35,14 @@ pub struct Cli {
   /// Disables effects.
   #[arg(long)]
   pub no_fx: bool,
+
+  /// Threshold of distortion effect.
+  #[arg(short, long, default_value_t = 0.02)]
+  pub distortion: f32,
+
+  /// Gain multiplier for incoming signal.
+  #[arg(short, long, default_value_t = 4.0)]
+  pub gain: f32,
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
@@ -92,7 +100,6 @@ fn main() {
           buf.extend(samples);
         });
         if !buf.is_empty() {
-          println!("buf: {}", buf.len());
           let take = data.len().min(buf.len());
           buf
             .iter()
@@ -194,19 +201,20 @@ fn main() {
                   noise_idx += 0.005;
                 }
                 // Clear-ish music.
-                // let atten = 0.2;
+                // let atten = 0.05;
                 // Clear-ish voice.
-                let atten = 0.02;
+                // let atten = 0.005;
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
-                  *s *= 4.0;
-                  *s = s.clamp(-atten, atten) * (0.4 / atten);
+                  *s = s.clamp(-args.distortion, args.distortion)
+                    * (0.4 / args.distortion);
+                  *s *= args.gain;
                   *s += n * 0.3;
                   *s = s.clamp(-1.0, 1.0);
                 }
                 lowpass_filter::lowpass_filter(&mut samples, 44100.0, 700.0);
               } else {
                 for s in samples.iter_mut() {
-                  *s *= 4.0;
+                  *s *= args.gain;
                   *s = s.clamp(-1.0, 1.0);
                 }
               }

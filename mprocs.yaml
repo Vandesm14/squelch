@@ -15,5 +15,12 @@ procs:
       - --
       - --hotkey
       - Pause
+  server:
+    autostart: false
+    cmd:
+      - cargo
+      - run
+      - --bin
+      - server
 
 hide_keymap_window: true

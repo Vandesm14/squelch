@@ -172,11 +172,31 @@ fn main() {
     .unwrap();
     let mut highpass = DirectForm1::<f32>::new(coeffs);
 
-    let mut mic_buf: Vec<f32> = Vec::with_capacity(TX_BUFFER_SIZE);
-
     let mut ptt = false;
+    let mut mic_buf: Vec<f32> = Vec::with_capacity(TX_BUFFER_SIZE);
     loop {
       if let Ok(new_ptt) = ptt_rx.try_recv() {
+        // If PTT was just released , send white noise.
+        if ptt != new_ptt && !new_ptt {
+          for _ in 0..8 {
+            let mut noise_buf = [0f32; TX_BUFFER_SIZE];
+
+            for sample in noise_buf.iter_mut() {
+              *sample = noiser.get([noise_idx, noise_idx]) as f32 * 0.1;
+              noise_idx += 0.03;
+            }
+
+            map_would_block(
+              socket.send_to(
+                &bincode::encode_to_vec(Packet::Audio(noise_buf), standard())
+                  .unwrap(),
+                address,
+              ),
+            )
+            .unwrap();
+          }
+        }
+
         ptt = new_ptt;
       }
 

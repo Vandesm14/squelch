@@ -117,15 +117,6 @@ fn read_wav_file(
     }
   }
 
-  // If stereo, convert to mono by averaging channels
-  // if spec.channels == 2 {
-  //   let mono_samples: Vec<f32> = samples
-  //     .chunks_exact(2)
-  //     .map(|pair| (pair[0] + pair[1]) / 2.0)
-  //     .collect();
-  //   return Ok(mono_samples);
-  // }
-
   Ok(samples)
 }
 
@@ -157,16 +148,7 @@ fn read_mp3_file(
           .map(|&sample| sample as f32 / i16::MAX as f32)
           .collect();
 
-        // If stereo, convert to mono by averaging channels
-        // if channels == 2 {
-        //   let mono_samples: Vec<f32> = frame_samples
-        //     .chunks_exact(2)
-        //     .map(|pair| (pair[0] + pair[1]) / 2.0)
-        //     .collect();
-        //   samples.extend(mono_samples);
-        // } else {
         samples.extend(frame_samples);
-        // }
       }
       Err(minimp3::Error::Eof) => break,
       Err(e) => return Err(e.into()),

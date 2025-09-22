@@ -151,7 +151,7 @@ fn main() {
     let mut noise_idx = 0.0f64;
     let noiser: Fbm<noise::Simplex> = noise::Fbm::new(0);
 
-    let f0 = 3000.hz();
+    let f0 = 8000.hz();
     let fs = 44100.hz();
     let coeffs = Coefficients::<f32>::from_params(
       Type::LowPass,
@@ -162,8 +162,7 @@ fn main() {
     .unwrap();
     let mut lowpass = DirectForm1::<f32>::new(coeffs);
 
-    let f0 = 300.hz();
-    let fs = 44100.hz();
+    let f0 = 400.hz();
     let coeffs = Coefficients::<f32>::from_params(
       Type::HighPass,
       fs,

@@ -192,7 +192,10 @@ fn main() {
                   *s = noiser.get([noise_idx, noise_idx]) as f32;
                   noise_idx += 0.005;
                 }
-                let atten = 0.01;
+                // Clear-ish music.
+                // let atten = 0.2;
+                // Clear-ish voice.
+                let atten = 0.02;
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
                   *s *= 4.0;
                   *s = s.clamp(-atten, atten) * (0.4 / atten);

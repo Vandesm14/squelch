@@ -41,7 +41,7 @@ pub struct Cli {
   pub distortion: f32,
 
   /// Gain multiplier for incoming signal.
-  #[arg(short, long, default_value_t = 4.0)]
+  #[arg(short, long, default_value_t = 1.0)]
   pub gain: f32,
 }
 

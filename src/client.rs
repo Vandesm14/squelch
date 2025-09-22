@@ -1,4 +1,5 @@
 use std::{
+  collections::VecDeque,
   net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
   str::FromStr,
   sync::mpsc::{self, Sender},
@@ -82,7 +83,7 @@ fn main() {
 
   let spk_device = host.default_output_device().unwrap();
   let spk_config = spk_device.default_output_config().unwrap();
-  let mut buf = Vec::with_capacity(TX_BUFFER_SIZE);
+  let mut buf = VecDeque::with_capacity(TX_BUFFER_SIZE);
   let spk_stream = spk_device
     .build_output_stream(
       &spk_config.into(),

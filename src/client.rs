@@ -76,8 +76,28 @@ fn main() {
 
   let host = cpal::default_host();
 
+  let spk_config = cpal::SupportedStreamConfig::new(
+    1,
+    cpal::SampleRate(44100),
+    cpal::SupportedBufferSize::Range {
+      min: 44100 * 1,
+      max: 44100 * 1,
+    },
+    cpal::SampleFormat::F32,
+  );
+
+  let mic_config = cpal::SupportedStreamConfig::new(
+    1,
+    cpal::SampleRate(44100),
+    cpal::SupportedBufferSize::Range {
+      min: 44100 * 1,
+      max: 44100 * 1,
+    },
+    cpal::SampleFormat::F32,
+  );
+
   let mic_device = host.default_input_device().unwrap();
-  let mic_config = mic_device.default_input_config().unwrap();
+  // let mic_config = mic_device.default_input_config().unwrap();
   println!("Sample rate: {}", mic_config.sample_rate().0);
 
   let mic_stream = mic_device
@@ -94,7 +114,7 @@ fn main() {
   mic_stream.play().unwrap();
 
   let spk_device = host.default_output_device().unwrap();
-  let spk_config = spk_device.default_output_config().unwrap();
+  // let spk_config = spk_device.default_output_config().unwrap();
   let mut buf = VecDeque::with_capacity(TX_BUFFER_SIZE);
   let spk_stream = spk_device
     .build_output_stream(
@@ -220,17 +240,16 @@ fn main() {
                   *s += n * 0.3;
                   *s = s.clamp(-1.0, 1.0);
                 }
-                lowpass_filter::lowpass_filter(&mut samples, 44100.0, 700.0);
+
+                for s in samples.iter_mut() {
+                  *s = lowpass.run(*s);
+                  *s = highpass.run(*s);
+                }
               } else {
                 for s in samples.iter_mut() {
                   *s *= args.gain;
                   *s = s.clamp(-1.0, 1.0);
                 }
-              }
-
-              for s in samples.iter_mut() {
-                *s = lowpass.run(*s);
-                *s = highpass.run(*s);
               }
 
               spk_tx.send(samples).unwrap();

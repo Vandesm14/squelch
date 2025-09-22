@@ -43,6 +43,10 @@ pub struct Cli {
   /// Gain multiplier for incoming signal.
   #[arg(short, long, default_value_t = 1.0)]
   pub gain: f32,
+
+  /// Gain multiplier for mic signal.
+  #[arg(short, long, default_value_t = 1.0)]
+  pub mic_gain: f32,
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
@@ -168,6 +172,11 @@ fn main() {
             for chunk in new_samples.chunks_exact(TX_BUFFER_SIZE) {
               let mut buf = [0f32; TX_BUFFER_SIZE];
               buf.copy_from_slice(chunk);
+
+              for s in buf.iter_mut() {
+                *s *= args.mic_gain;
+                *s = s.clamp(-1.0, 1.0);
+              }
 
               map_would_block(
                 socket.send_to(

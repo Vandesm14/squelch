@@ -124,7 +124,7 @@ fn main() {
     .unwrap();
 
     let mut noise_idx = 0.0f64;
-    let noiser: Fbm<noise::Worley> = noise::Fbm::new(0);
+    let noiser: Fbm<noise::Simplex> = noise::Fbm::new(0);
 
     let f0 = 3000.hz();
     let fs = 44100.hz();

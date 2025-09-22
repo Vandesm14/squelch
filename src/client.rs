@@ -37,7 +37,7 @@ pub struct Cli {
   pub no_fx: bool,
 
   /// Threshold of distortion effect.
-  #[arg(short, long, default_value_t = 0.05)]
+  #[arg(short, long, default_value_t = 0.005)]
   pub distortion: f32,
 
   /// Gain multiplier for incoming signal.
@@ -79,14 +79,14 @@ fn main() {
   let spk_config = cpal::SupportedStreamConfig::new(
     1,
     cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range { min: 256, max: 256 },
+    cpal::SupportedBufferSize::Range { min: 1, max: 8192 },
     cpal::SampleFormat::F32,
   );
 
   let mic_config = cpal::SupportedStreamConfig::new(
     1,
     cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range { min: 256, max: 256 },
+    cpal::SupportedBufferSize::Range { min: 1, max: 8192 },
     cpal::SampleFormat::F32,
   );
 
@@ -173,6 +173,8 @@ fn main() {
     .unwrap();
     let mut highpass = DirectForm1::<f32>::new(coeffs);
 
+    let mut mic_buf: Vec<f32> = Vec::with_capacity(TX_BUFFER_SIZE);
+
     let mut ptt = false;
     loop {
       if let Ok(new_ptt) = ptt_rx.try_recv() {
@@ -182,7 +184,10 @@ fn main() {
       if ptt {
         match mic_rx.try_recv() {
           Ok(new_samples) => {
-            for chunk in new_samples.chunks_exact(TX_BUFFER_SIZE) {
+            mic_buf.extend(new_samples);
+
+            let mut count = 0;
+            for chunk in mic_buf.chunks_exact(TX_BUFFER_SIZE) {
               let mut buf = [0f32; TX_BUFFER_SIZE];
               buf.copy_from_slice(chunk);
 
@@ -199,7 +204,10 @@ fn main() {
                 ),
               )
               .unwrap();
+
+              count += 1;
             }
+            mic_buf.drain(0..count * TX_BUFFER_SIZE);
           }
           Err(err) => match err {
             mpsc::TryRecvError::Empty => {}
@@ -222,10 +230,7 @@ fn main() {
                   *s = noiser.get([noise_idx, noise_idx]) as f32;
                   noise_idx += 0.005;
                 }
-                // Clear-ish music.
-                // let atten = 0.05;
-                // Clear-ish voice.
-                // let atten = 0.005;
+
                 for (s, n) in samples.iter_mut().zip(noise.iter()) {
                   *s = s.clamp(-args.distortion, args.distortion)
                     * (0.4 / args.distortion);

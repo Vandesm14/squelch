@@ -1,5 +1,5 @@
 use std::{
-  collections::{HashMap, VecDeque, vec_deque},
+  collections::{HashMap, VecDeque},
   net::{SocketAddr, UdpSocket},
   sync::mpsc::channel,
   time::{Duration, Instant},

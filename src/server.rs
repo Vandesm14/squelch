@@ -2,16 +2,13 @@ use std::{
   collections::{HashMap, VecDeque},
   net::{SocketAddr, UdpSocket},
   sync::mpsc::channel,
-  time::{Duration, Instant},
+  time::Instant,
 };
 
 use bincode::config::{Configuration, standard};
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION};
 
 fn main() -> std::io::Result<()> {
-  let wait_duration =
-    Duration::from_secs_f32(1.0 / (44100.0 / TX_BUFFER_SIZE as f32));
-
   let socket = UdpSocket::bind("0.0.0.0:1837")?;
   socket
     .set_broadcast(true)
@@ -44,7 +41,7 @@ fn main() -> std::io::Result<()> {
           .or_insert_with(|| VecDeque::from_iter([bytes]));
       }
 
-      if last_sent.elapsed() > wait_duration {
+      if last_sent.elapsed() > *WAIT_DURATION {
         current_chunks.clear();
 
         for (src, chunks) in client_chunks.iter_mut() {

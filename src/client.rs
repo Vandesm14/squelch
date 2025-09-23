@@ -7,6 +7,7 @@ use std::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self},
   },
+  time::Instant,
 };
 
 use bincode::config::{Configuration, standard};
@@ -22,7 +23,10 @@ use global_hotkey::{
 };
 use noise::{Fbm, NoiseFn};
 
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, map_would_block};
+use squelch::{
+  MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION, fx::FxUnit,
+  map_would_block,
+};
 
 /// Squelch
 #[derive(Debug, Clone, Parser)]
@@ -135,6 +139,8 @@ fn main() {
   let ptt_ref = ptt.clone();
   std::thread::spawn(move || {
     let mut buf = [0; MAX_PACKET_SIZE];
+    let mut fx_unit = FxUnit::new(args.no_fx, args.gain, args.distortion);
+
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.set_nonblocking(true).unwrap();
     map_would_block(socket.send_to(
@@ -143,52 +149,16 @@ fn main() {
     ))
     .unwrap();
 
-    let mut noise_idx = 0.0f64;
-    let noiser: Fbm<noise::Simplex> = noise::Fbm::new(0);
-
-    let f0 = 8000.hz();
-    let fs = 44100.hz();
-    let coeffs = Coefficients::<f32>::from_params(
-      Type::LowPass,
-      fs,
-      f0,
-      Q_BUTTERWORTH_F32,
-    )
-    .unwrap();
-    let mut lowpass = DirectForm1::<f32>::new(coeffs);
-
-    let f0 = 400.hz();
-    let coeffs = Coefficients::<f32>::from_params(
-      Type::HighPass,
-      fs,
-      f0,
-      Q_BUTTERWORTH_F32,
-    )
-    .unwrap();
-    let mut highpass = DirectForm1::<f32>::new(coeffs);
-
     let mut last_ptt = false;
+    let mut do_squelch = false;
+    let mut last_packet = Instant::now();
     let mut mic_buf: Vec<f32> = Vec::with_capacity(TX_BUFFER_SIZE);
     loop {
       // If PTT was just released, send white noise.
       let new_ptt = ptt_ref.load(Ordering::SeqCst);
       if !new_ptt && last_ptt {
-        for _ in 0..8 {
-          let mut noise_buf = [0f32; TX_BUFFER_SIZE];
-
-          for sample in noise_buf.iter_mut() {
-            *sample = noiser.get([noise_idx, noise_idx]) as f32 * 0.1;
-            noise_idx += 0.03;
-          }
-
-          map_would_block(
-            socket.send_to(
-              &bincode::encode_to_vec(Packet::Audio(noise_buf), standard())
-                .unwrap(),
-              address,
-            ),
-          )
-          .unwrap();
+        for chunk in fx_unit.squelch() {
+          spk_tx.send(chunk).unwrap();
         }
       }
       last_ptt = new_ptt;
@@ -236,38 +206,24 @@ fn main() {
           Ok((packet, _)) => match packet {
             Packet::Ping => todo!(),
             Packet::Audio(mut samples) => {
-              if !thread_args.no_fx {
-                let mut noise = [0f32; TX_BUFFER_SIZE];
-                for s in noise.iter_mut() {
-                  *s = noiser.get([noise_idx, noise_idx]) as f32;
-                  noise_idx += 0.005;
-                }
+              last_packet = Instant::now();
+              do_squelch = true;
 
-                for (s, n) in samples.iter_mut().zip(noise.iter()) {
-                  *s = s.clamp(-args.distortion, args.distortion)
-                    * (0.4 / args.distortion);
-                  *s *= args.gain;
-                  *s += n * 0.3;
-                  *s = s.clamp(-1.0, 1.0);
-                }
-
-                for s in samples.iter_mut() {
-                  *s = lowpass.run(*s);
-                  *s = highpass.run(*s);
-                }
-              } else {
-                for s in samples.iter_mut() {
-                  *s *= args.gain;
-                  *s = s.clamp(-1.0, 1.0);
-                }
-              }
-
+              fx_unit.run(&mut samples);
               spk_tx.send(samples).unwrap();
             }
           },
           Err(err) => {
             eprintln!("Failed to decode packet: {err:?}")
           }
+        }
+      } else if do_squelch
+        && last_packet.elapsed() >= WAIT_DURATION.mul_f32(3.0)
+      {
+        do_squelch = false;
+
+        for chunk in fx_unit.squelch() {
+          spk_tx.send(chunk).unwrap();
         }
       }
     }

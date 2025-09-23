@@ -1,4 +1,7 @@
+pub mod fx;
 pub mod jitter;
+
+use std::{sync::LazyLock, time::Duration};
 
 use bincode::{Decode, Encode};
 
@@ -21,3 +24,7 @@ pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
     },
   }
 }
+
+pub static WAIT_DURATION: LazyLock<Duration> = LazyLock::new(|| {
+  Duration::from_secs_f32(1.0 / (44100.0 / TX_BUFFER_SIZE as f32))
+});

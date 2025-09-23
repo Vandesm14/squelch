@@ -11,9 +11,6 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
-use biquad::{
-  Biquad, Coefficients, DirectForm1, Q_BUTTERWORTH_F32, ToHertz, Type,
-};
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
@@ -21,7 +18,6 @@ use global_hotkey::{
   GlobalHotKeyEvent, GlobalHotKeyManager,
   hotkey::{Code, HotKey},
 };
-use noise::{Fbm, NoiseFn};
 
 use squelch::{
   MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION, fx::FxUnit,
@@ -135,7 +131,6 @@ fn main() {
     .unwrap();
   spk_stream.play().unwrap();
 
-  let thread_args = args.clone();
   let ptt_ref = ptt.clone();
   std::thread::spawn(move || {
     let mut buf = [0; MAX_PACKET_SIZE];

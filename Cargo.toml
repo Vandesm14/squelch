@@ -3,22 +3,6 @@ name = "squelch"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "server"
-path = "src/server.rs"
-
-[[bin]]
-name = "client"
-path = "src/client.rs"
-
-[[bin]]
-name = "play-file"
-path = "src/play-file.rs"
-
-[[bin]]
-name = "record-sound"
-path = "src/record-sound.rs"
-
 [dependencies]
 bincode = "2.0"
 biquad = "0.5.0"

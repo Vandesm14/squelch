@@ -41,7 +41,7 @@ pub struct Cli {
   pub no_fx: bool,
 
   /// Threshold of distortion effect.
-  #[arg(short, long, default_value_t = 0.005)]
+  #[arg(short, long, default_value_t = 0.05)]
   pub distortion: f32,
 
   /// Gain multiplier for incoming signal.

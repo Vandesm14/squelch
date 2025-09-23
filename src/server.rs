@@ -28,6 +28,9 @@ fn main() -> std::io::Result<()> {
       VecDeque<[f32; TX_BUFFER_SIZE]>,
     > = HashMap::new();
 
+    let mut current_chunks: Vec<(SocketAddr, [f32; TX_BUFFER_SIZE])> =
+      Vec::new();
+    let mut buf = [0f32; TX_BUFFER_SIZE];
     loop {
       while let Ok(src) = ping_rx.try_recv() {
         client_chunks.entry(src).or_default();
@@ -37,30 +40,32 @@ fn main() -> std::io::Result<()> {
       while let Ok((src, bytes)) = audio_rx.try_recv() {
         client_chunks
           .entry(src)
-          .and_modify(|e| {
-            // REMOVE THIS.
-            e.push_back(bytes);
-          })
-          .or_insert_with(|| {
-            let mut v = VecDeque::new();
-            v.push_back(bytes);
-            v
-          });
+          .and_modify(|e| e.push_back(bytes))
+          .or_insert_with(|| VecDeque::from_iter([bytes]));
       }
 
       if last_sent.elapsed() > wait_duration {
-        let mut buf = [0f32; TX_BUFFER_SIZE];
-        for (_, chunks) in client_chunks.iter_mut() {
+        current_chunks.clear();
+
+        for (src, chunks) in client_chunks.iter_mut() {
           if let Some(samples) = chunks.pop_front() {
-            for (b, s) in buf.iter_mut().zip(samples.iter()) {
-              *b += s;
-              *b = b.clamp(-1.0, 1.0);
-            }
+            current_chunks.push((*src, samples));
           }
         }
 
-        if buf.iter().any(|a| *a != 0.0) {
-          for (client, _) in client_chunks.iter() {
+        for (client, _) in client_chunks.iter() {
+          buf.fill(0.0);
+
+          for (src, samples) in current_chunks.iter() {
+            if src != client {
+              for (b, s) in buf.iter_mut().zip(samples.iter()) {
+                *b += s;
+                *b = b.clamp(-1.0, 1.0);
+              }
+            }
+          }
+
+          if buf.iter().any(|a| *a != 0.0) {
             cloned_socket
               .send_to(
                 &bincode::encode_to_vec(Packet::Audio(buf), standard())

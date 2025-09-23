@@ -213,7 +213,7 @@ fn main() {
           }
         }
       } else if do_squelch
-        && last_packet.elapsed() >= WAIT_DURATION.mul_f32(3.0)
+        && last_packet.elapsed() >= WAIT_DURATION.mul_f32(7.0)
       {
         do_squelch = false;
 

@@ -3,7 +3,7 @@ use biquad::{
 };
 use noise::{Fbm, NoiseFn, Simplex};
 
-use crate::TX_BUFFER_SIZE;
+use crate::{TX_BUFFER_SIZE, TxBuffer};
 
 #[derive(Debug, Clone)]
 pub struct FxUnit {
@@ -57,7 +57,7 @@ impl FxUnit {
     }
   }
 
-  pub fn run(&mut self, samples: &mut [f32; TX_BUFFER_SIZE]) {
+  pub fn run(&mut self, samples: &mut TxBuffer) {
     if !self.disabled {
       let mut noise = [0f32; TX_BUFFER_SIZE];
       for s in noise.iter_mut() {
@@ -85,7 +85,7 @@ impl FxUnit {
     }
   }
 
-  pub fn squelch(&mut self) -> Vec<[f32; TX_BUFFER_SIZE]> {
+  pub fn squelch(&mut self) -> Vec<TxBuffer> {
     let length = 8;
     let mut chunks = Vec::with_capacity(length);
     if !self.disabled {

@@ -20,7 +20,7 @@ use global_hotkey::{
 };
 
 use squelch::{
-  MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION, fx::FxUnit,
+  MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, TxBuffer, WAIT_DURATION, fx::FxUnit,
   map_would_block,
 };
 
@@ -65,7 +65,7 @@ fn main() {
   };
 
   let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
-  let (spk_tx, spk_rx) = mpsc::channel::<[f32; TX_BUFFER_SIZE]>();
+  let (spk_tx, spk_rx) = mpsc::channel::<TxBuffer>();
   let ptt = Arc::new(AtomicBool::new(false));
 
   let host = cpal::default_host();

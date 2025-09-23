@@ -6,7 +6,9 @@ use std::{
 };
 
 use bincode::config::{Configuration, standard};
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION};
+use squelch::{
+  MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, TxBuffer, WAIT_DURATION,
+};
 
 fn main() -> std::io::Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:1837")?;
@@ -14,19 +16,16 @@ fn main() -> std::io::Result<()> {
     .set_broadcast(true)
     .expect("set_broadcast to true should succeed");
 
-  let (audio_tx, audio_rx) = channel::<(SocketAddr, [f32; TX_BUFFER_SIZE])>();
+  let (audio_tx, audio_rx) = channel::<(SocketAddr, TxBuffer)>();
   let (ping_tx, ping_rx) = channel::<SocketAddr>();
 
   let cloned_socket = socket.try_clone().unwrap();
   std::thread::spawn(move || {
     let mut last_sent = Instant::now();
-    let mut client_chunks: HashMap<
-      SocketAddr,
-      VecDeque<[f32; TX_BUFFER_SIZE]>,
-    > = HashMap::new();
+    let mut client_chunks: HashMap<SocketAddr, VecDeque<TxBuffer>> =
+      HashMap::new();
 
-    let mut current_chunks: Vec<(SocketAddr, [f32; TX_BUFFER_SIZE])> =
-      Vec::new();
+    let mut current_chunks: Vec<(SocketAddr, TxBuffer)> = Vec::new();
     let mut buf = [0f32; TX_BUFFER_SIZE];
     loop {
       while let Ok(src) = ping_rx.try_recv() {

@@ -11,3 +11,13 @@ pub enum Packet {
   Ping,
   Audio([f32; TX_BUFFER_SIZE]),
 }
+
+pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
+  match result {
+    Ok(_) => std::io::Result::Ok(()),
+    Err(e) => match e.kind() {
+      std::io::ErrorKind::WouldBlock => Ok(()),
+      _ => Err(e),
+    },
+  }
+}

@@ -2,7 +2,11 @@ use std::{
   collections::VecDeque,
   net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
   str::FromStr,
-  sync::mpsc::{self, Sender},
+  sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self},
+  },
 };
 
 use bincode::config::{Configuration, standard};
@@ -18,7 +22,7 @@ use global_hotkey::{
 };
 use noise::{Fbm, NoiseFn};
 
-use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, map_would_block};
 
 /// Squelch
 #[derive(Debug, Clone, Parser)]
@@ -49,16 +53,6 @@ pub struct Cli {
   pub mic_gain: f32,
 }
 
-pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {
-  match result {
-    Ok(_) => std::io::Result::Ok(()),
-    Err(e) => match e.kind() {
-      std::io::ErrorKind::WouldBlock => Ok(()),
-      _ => Err(e),
-    },
-  }
-}
-
 fn main() {
   let args = Cli::parse();
 
@@ -72,10 +66,9 @@ fn main() {
 
   let (mic_tx, mic_rx) = mpsc::channel::<Vec<f32>>();
   let (spk_tx, spk_rx) = mpsc::channel::<[f32; TX_BUFFER_SIZE]>();
-  let (ptt_tx, ptt_rx) = mpsc::channel::<bool>();
+  let ptt = Arc::new(AtomicBool::new(false));
 
   let host = cpal::default_host();
-
   let spk_config = cpal::SupportedStreamConfig::new(
     1,
     cpal::SampleRate(44100),
@@ -93,17 +86,19 @@ fn main() {
   let mic_device = host.default_input_device().unwrap();
   println!("mic config: {mic_config:?}");
 
+  let ptt_ref = ptt.clone();
   let mic_stream = mic_device
     .build_input_stream(
       &mic_config.clone().into(),
       move |data: &[f32], _: &_| {
-        mic_tx.send(data.to_vec()).unwrap();
+        if ptt_ref.load(Ordering::SeqCst) {
+          mic_tx.send(data.to_vec()).unwrap();
+        }
       },
       err_fn,
       None,
     )
     .unwrap();
-
   mic_stream.play().unwrap();
 
   let spk_device = host.default_output_device().unwrap();
@@ -134,10 +129,10 @@ fn main() {
       None,
     )
     .unwrap();
-
   spk_stream.play().unwrap();
 
   let thread_args = args.clone();
+  let ptt_ref = ptt.clone();
   std::thread::spawn(move || {
     let mut buf = [0; MAX_PACKET_SIZE];
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
@@ -172,35 +167,33 @@ fn main() {
     .unwrap();
     let mut highpass = DirectForm1::<f32>::new(coeffs);
 
-    let mut ptt = false;
+    let mut last_ptt = false;
     let mut mic_buf: Vec<f32> = Vec::with_capacity(TX_BUFFER_SIZE);
     loop {
-      if let Ok(new_ptt) = ptt_rx.try_recv() {
-        // If PTT was just released , send white noise.
-        if ptt != new_ptt && !new_ptt {
-          for _ in 0..8 {
-            let mut noise_buf = [0f32; TX_BUFFER_SIZE];
+      // If PTT was just released, send white noise.
+      let new_ptt = ptt_ref.load(Ordering::SeqCst);
+      if !new_ptt && last_ptt {
+        for _ in 0..8 {
+          let mut noise_buf = [0f32; TX_BUFFER_SIZE];
 
-            for sample in noise_buf.iter_mut() {
-              *sample = noiser.get([noise_idx, noise_idx]) as f32 * 0.1;
-              noise_idx += 0.03;
-            }
-
-            map_would_block(
-              socket.send_to(
-                &bincode::encode_to_vec(Packet::Audio(noise_buf), standard())
-                  .unwrap(),
-                address,
-              ),
-            )
-            .unwrap();
+          for sample in noise_buf.iter_mut() {
+            *sample = noiser.get([noise_idx, noise_idx]) as f32 * 0.1;
+            noise_idx += 0.03;
           }
+
+          map_would_block(
+            socket.send_to(
+              &bincode::encode_to_vec(Packet::Audio(noise_buf), standard())
+                .unwrap(),
+              address,
+            ),
+          )
+          .unwrap();
         }
-
-        ptt = new_ptt;
       }
+      last_ptt = new_ptt;
 
-      if ptt {
+      if ptt_ref.load(Ordering::SeqCst) {
         match mic_rx.try_recv() {
           Ok(new_samples) => {
             mic_buf.extend(new_samples);
@@ -289,43 +282,39 @@ fn main() {
     let hotkey = HotKey::new(None, code);
     manager.register(hotkey).unwrap();
 
-    let hotkey_ptt_tx = ptt_tx.clone();
     loop {
       if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv()
         && event.id == code as u32
       {
         match event.state {
           global_hotkey::HotKeyState::Pressed => {
-            hotkey_ptt_tx.send(true).unwrap()
+            ptt.store(true, Ordering::SeqCst);
           }
           global_hotkey::HotKeyState::Released => {
-            hotkey_ptt_tx.send(false).unwrap()
+            ptt.store(false, Ordering::SeqCst);
           }
         }
       }
     }
   }
 
+  let ptt_ref = ptt.clone();
   let native_options = eframe::NativeOptions::default();
   eframe::run_native(
     "Squelch",
     native_options,
-    Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc, ptt_tx)))),
+    Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc, ptt_ref)))),
   )
   .unwrap();
 }
 
 struct MyEguiApp {
-  ptt_sender: Sender<bool>,
-  ptt: bool,
+  ptt: Arc<AtomicBool>,
 }
 
 impl MyEguiApp {
-  fn new(_: &eframe::CreationContext<'_>, ptt_sender: Sender<bool>) -> Self {
-    MyEguiApp {
-      ptt_sender,
-      ptt: false,
-    }
+  fn new(_: &eframe::CreationContext<'_>, ptt: Arc<AtomicBool>) -> Self {
+    MyEguiApp { ptt }
   }
 }
 
@@ -333,15 +322,13 @@ impl eframe::App for MyEguiApp {
   fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
     egui::CentralPanel::default().show(ctx, |ui| {
       ui.heading("Hello World!");
-      ui.label(format!("PTT: {}", self.ptt));
+      ui.label(format!("PTT: {}", self.ptt.load(Ordering::SeqCst)));
 
       let response = ui.add(Button::new("PTT").sense(Sense::drag()));
       if response.drag_started() {
-        self.ptt = true;
-        self.ptt_sender.send(self.ptt).unwrap();
+        self.ptt.store(true, Ordering::SeqCst);
       } else if response.drag_stopped() {
-        self.ptt = false;
-        self.ptt_sender.send(self.ptt).unwrap();
+        self.ptt.store(false, Ordering::SeqCst);
       }
     });
   }

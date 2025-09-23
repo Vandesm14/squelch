@@ -46,8 +46,6 @@ fn main() -> std::io::Result<()> {
             v.push_back(bytes);
             v
           });
-
-        println!("receive from {} as {:?}", src, Instant::now());
       }
 
       if last_sent.elapsed() > wait_duration {

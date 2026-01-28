@@ -5,13 +5,13 @@ edition = "2024"
 
 [dependencies]
 bincode = "2.0"
-biquad = "0.5.0"
-clap = { version = "4.5.48", features = ["derive"] }
+biquad = "0.5"
+clap = { version = "4.5", features = ["derive"] }
 cpal = "0.16"
 ctrlc = "3.4"
 eframe = "0.32"
-global-hotkey = "0.7.0"
+global-hotkey = "0.7"
 hound = "3.5"
-lowpass-filter = "0.4.1"
+lowpass-filter = "0.4"
 minimp3 = "0.5"
-noise = "0.9.0"
+noise = "0.9"

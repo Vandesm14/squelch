@@ -14,7 +14,7 @@ use bincode::config::{Configuration, standard};
 use clap::Parser;
 use hound::{WavSpec, WavWriter};
 
-use squelch::{MAX_PACKET_SIZE, Packet};
+use squelch::{MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, WAIT_DURATION};
 
 /// Record sound from ham radio server to WAV file
 #[derive(Debug, Clone, Parser)]
@@ -27,6 +27,10 @@ pub struct Cli {
   /// Output WAV file path (optional - will generate timestamped filename if not provided)
   #[arg(short, long)]
   pub output: Option<String>,
+
+  /// Always record, generating silence when server is not transmitting
+  #[arg(long)]
+  pub always_record: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -124,14 +128,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   });
 
   println!("Recording started!");
+  if args.always_record {
+    println!(
+      "Always-record mode enabled: will generate silence when server is not transmitting"
+    );
+  }
 
   let mut total_samples = 0u64;
   let mut last_update = std::time::Instant::now();
+  let mut last_audio_packet = std::time::Instant::now();
 
   // Main loop - process audio data and write to WAV file
   while running.load(Ordering::SeqCst) {
+    let mut received_audio = false;
+
     // Process any pending audio data
     while let Ok(audio_data) = audio_rx.try_recv() {
+      received_audio = true;
+      last_audio_packet = std::time::Instant::now();
+
       let mut writer = wav_writer.lock().unwrap();
       for &sample in &audio_data {
         if let Err(e) = writer.write_sample(sample) {
@@ -151,6 +166,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
         last_update = std::time::Instant::now();
+      }
+    }
+
+    // If always_record is enabled and we haven't received audio in the expected interval,
+    // generate silence to maintain continuous recording
+    if args.always_record && !received_audio {
+      let elapsed = last_audio_packet.elapsed();
+      if elapsed >= *WAIT_DURATION {
+        // Generate silence chunks for each missed interval
+        let mut writer = wav_writer.lock().unwrap();
+        let missed_chunks =
+          (elapsed.as_secs_f64() / WAIT_DURATION.as_secs_f64()) as u64;
+
+        for _ in 0..missed_chunks {
+          let silence = vec![0.0f32; TX_BUFFER_SIZE];
+          for &sample in &silence {
+            if let Err(e) = writer.write_sample(sample) {
+              eprintln!("Failed to write silence sample: {}", e);
+              running.store(false, Ordering::SeqCst);
+              break;
+            }
+          }
+          total_samples += silence.len() as u64;
+        }
+
+        // Update last_audio_packet to account for the silence we just generated
+        let remainder_nanos = elapsed.as_nanos() % WAIT_DURATION.as_nanos();
+        let remainder = std::time::Duration::from_nanos(remainder_nanos as u64);
+        last_audio_packet = std::time::Instant::now()
+          .checked_sub(remainder)
+          .unwrap_or(std::time::Instant::now());
+
+        // Print progress every second
+        if last_update.elapsed().as_secs() >= 1 {
+          let duration_secs = total_samples as f64 / 44100.0;
+          print!(
+            "\rRecording: {:.1}s ({} samples)",
+            duration_secs, total_samples
+          );
+          std::io::Write::flush(&mut std::io::stdout()).unwrap();
+          last_update = std::time::Instant::now();
+        }
       }
     }
 

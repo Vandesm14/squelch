@@ -10,6 +10,10 @@ use squelch::{
   MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, TxBuffer, WAIT_DURATION,
 };
 
+/// Maximum number of buffered audio chunks to retain per client before
+/// dropping the oldest.
+const MAX_CLIENT_BACKLOG: usize = 8;
+
 fn main() -> std::io::Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:1837")?;
   socket
@@ -44,6 +48,10 @@ fn main() -> std::io::Result<()> {
         current_chunks.clear();
 
         for (src, chunks) in client_chunks.iter_mut() {
+          while chunks.len() > MAX_CLIENT_BACKLOG {
+            chunks.pop_front();
+          }
+
           if let Some(samples) = chunks.pop_front() {
             current_chunks.push((*src, samples));
           }
@@ -72,7 +80,10 @@ fn main() -> std::io::Result<()> {
           }
         }
 
-        last_sent = Instant::now();
+        last_sent += *WAIT_DURATION;
+        if last_sent.elapsed() > *WAIT_DURATION * 4 {
+          last_sent = Instant::now();
+        }
       }
     }
   });

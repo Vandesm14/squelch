@@ -6,6 +6,7 @@ procs:
       - --bin
       - client
       - --
+      - --no-fx
   client2:
     cmd:
       - cargo
@@ -15,6 +16,7 @@ procs:
       - --
       - --hotkey
       - Pause
+      - --no-fx
   server:
     autostart: false
     cmd:

@@ -4,7 +4,7 @@ use std::{
   str::FromStr,
   sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self},
   },
   time::Instant,
@@ -51,6 +51,20 @@ pub struct Cli {
   /// Gain multiplier for mic signal.
   #[arg(short, long, default_value_t = 1.0)]
   pub mic_gain: f32,
+
+  /// Playback jitter-buffer depth in milliseconds. Audio is pre-buffered
+  /// to roughly this much before playback (re)starts, to absorb network and
+  /// scheduling jitter. Higher = fewer pops but more latency.
+  #[arg(long, default_value_t = 20)]
+  pub jitter_ms: u64,
+
+  /// Audio device period size in frames (0 = backend default). The default
+  /// backend period on this machine is large (~32 ms), which sets a latency
+  /// floor. Request a small fixed period (e.g. 441 ≈ 10 ms) to enable
+  /// low-latency playback like Mumble's low-delay mode. Requires the audio
+  /// backend to honor small periods.
+  #[arg(long, default_value_t = 0)]
+  pub frames: u32,
 }
 
 fn main() {
@@ -69,27 +83,37 @@ fn main() {
   let ptt = Arc::new(AtomicBool::new(false));
 
   let host = cpal::default_host();
-  let spk_config = cpal::SupportedStreamConfig::new(
-    1,
-    cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range { min: 1, max: 8192 },
-    cpal::SampleFormat::F32,
-  );
-
-  let mic_config = cpal::SupportedStreamConfig::new(
-    1,
-    cpal::SampleRate(44100),
-    cpal::SupportedBufferSize::Range { min: 1, max: 8192 },
-    cpal::SampleFormat::F32,
-  );
-
   let mic_device = host.default_input_device().unwrap();
+  let spk_device = host.default_output_device().unwrap();
+
+  // Request an explicit (optionally small) device period. The backend
+  // default period on this machine is ~32 ms, which caps how low playback
+  // latency can go; a small fixed period lets us run closer to Mumble.
+  //
+  // Not every backend honors an arbitrary fixed period (e.g. ALSA via
+  // PipeWire rejects many sizes with EINVAL), so probe the requested size
+  // on both devices and fall back to the backend default if it's rejected
+  // rather than panicking.
+  let buffer_size = resolve_buffer_size(&mic_device, &spk_device, args.frames);
+
+  let spk_config = cpal::StreamConfig {
+    channels: 1,
+    sample_rate: cpal::SampleRate(44100),
+    buffer_size,
+  };
+
+  let mic_config = cpal::StreamConfig {
+    channels: 1,
+    sample_rate: cpal::SampleRate(44100),
+    buffer_size,
+  };
+
   println!("mic config: {mic_config:?}");
 
   let ptt_ref = ptt.clone();
   let mic_stream = mic_device
     .build_input_stream(
-      &mic_config.clone().into(),
+      &mic_config,
       move |data: &[f32], _: &_| {
         if ptt_ref.load(Ordering::SeqCst) {
           mic_tx.send(data.to_vec()).unwrap();
@@ -101,29 +125,93 @@ fn main() {
     .unwrap();
   mic_stream.play().unwrap();
 
-  let spk_device = host.default_output_device().unwrap();
   println!("spk config: {spk_config:?}");
-  let mut buf = VecDeque::with_capacity(TX_BUFFER_SIZE);
+
+  // Diagnostics: count how often the speaker callback runs short of data.
+  // `underruns`       -> callback had an empty queue (whole block silenced).
+  // `partial_fills`   -> callback had some, but not enough, samples.
+  // `missing_samples` -> total samples we had to zero-fill across all blocks.
+  let underruns = Arc::new(AtomicU64::new(0));
+  let partial_fills = Arc::new(AtomicU64::new(0));
+  let missing_samples = Arc::new(AtomicU64::new(0));
+  let callbacks = Arc::new(AtomicU64::new(0));
+  let queue_len = Arc::new(AtomicU64::new(0));
+
+  let (underruns_cb, partial_cb, missing_cb, callbacks_cb, queue_cb) = (
+    underruns.clone(),
+    partial_fills.clone(),
+    missing_samples.clone(),
+    callbacks.clone(),
+    queue_len.clone(),
+  );
+
+  // Jitter buffer: pre-buffer ~jitter_ms of audio before (re)starting
+  // playback so the consumer block (which is much larger than a single
+  // network chunk) never skates on an empty queue.
+  let target_samples = (args.jitter_ms as usize * 44100) / 1000;
+  // Bound added latency if the sender clock runs slightly fast (drift).
+  let max_samples = target_samples * 4;
+
+  let mut buf = VecDeque::with_capacity(target_samples.max(TX_BUFFER_SIZE));
+  // Start in the "refilling" state so we wait for a healthy backlog.
+  let mut filling = true;
   let spk_stream = spk_device
     .build_output_stream(
-      &spk_config.into(),
+      &spk_config,
       move |data: &mut [f32], _: &_| {
         spk_rx.try_iter().for_each(|samples| {
           buf.extend(samples);
         });
-        if !buf.is_empty() {
-          let take = data.len().min(buf.len());
-          buf
-            .iter()
-            .enumerate()
-            .take(take)
-            .for_each(|(i, s)| data[i] = *s);
-          buf.drain(0..take);
-        } else {
-          for item in data.iter_mut() {
-            *item = 0.0;
+
+        callbacks_cb.fetch_add(1, Ordering::Relaxed);
+
+        // Drop oldest samples if drift made the backlog grow unbounded.
+        if buf.len() > max_samples {
+          let drop = buf.len() - target_samples;
+          buf.drain(0..drop);
+        }
+
+        // While (re)filling, emit silence until the backlog is healthy.
+        // This is what stops the per-block zero-fills (faint pops): we
+        // wait for a cushion instead of dribbling out partial blocks.
+        if filling {
+          if buf.len() >= target_samples {
+            filling = false;
+          } else {
+            for item in data.iter_mut() {
+              *item = 0.0;
+            }
+            queue_cb.store(buf.len() as u64, Ordering::Relaxed);
+            return;
           }
         }
+
+        let take = data.len().min(buf.len());
+
+        buf
+          .iter()
+          .enumerate()
+          .take(take)
+          .for_each(|(i, s)| data[i] = *s);
+        buf.drain(0..take);
+
+        // Couldn't fully satisfy the block: zero the tail, record it, and
+        // drop back into refilling so we rebuild a cushion before resuming
+        // rather than emitting a string of partially-filled blocks.
+        if take < data.len() {
+          if take == 0 {
+            underruns_cb.fetch_add(1, Ordering::Relaxed);
+          } else {
+            partial_cb.fetch_add(1, Ordering::Relaxed);
+          }
+          missing_cb.fetch_add((data.len() - take) as u64, Ordering::Relaxed);
+          for item in data[take..].iter_mut() {
+            *item = 0.0;
+          }
+          filling = true;
+        }
+
+        queue_cb.store(buf.len() as u64, Ordering::Relaxed);
       },
       err_fn,
       None,
@@ -257,6 +345,53 @@ fn main() {
     Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc, ptt_ref)))),
   )
   .unwrap();
+}
+
+/// Probe whether the requested fixed device period (`frames`) is accepted by
+/// both the input and output devices. Returns `Fixed(frames)` only if both
+/// accept it; otherwise warns and returns `Default` so we never panic on a
+/// backend that rejects the size (e.g. ALSA via PipeWire returning EINVAL).
+fn resolve_buffer_size(
+  mic_device: &cpal::Device,
+  spk_device: &cpal::Device,
+  frames: u32,
+) -> cpal::BufferSize {
+  if frames == 0 {
+    return cpal::BufferSize::Default;
+  }
+
+  let cfg = cpal::StreamConfig {
+    channels: 1,
+    sample_rate: cpal::SampleRate(44100),
+    buffer_size: cpal::BufferSize::Fixed(frames),
+  };
+  let noop_err = |_err| {};
+
+  let out_probe = spk_device
+    .build_output_stream(&cfg, |_: &mut [f32], _: &_| {}, noop_err, None)
+    .map(drop);
+  let in_probe = mic_device
+    .build_input_stream(&cfg, |_: &[f32], _: &_| {}, noop_err, None)
+    .map(drop);
+
+  if out_probe.is_ok() && in_probe.is_ok() {
+    println!("Using fixed device period of {frames} frames.");
+    return cpal::BufferSize::Fixed(frames);
+  }
+
+  if let Err(e) = out_probe {
+    eprintln!(
+      "warning: output device rejected --frames {frames} ({e}); \
+       falling back to backend default period"
+    );
+  }
+  if let Err(e) = in_probe {
+    eprintln!(
+      "warning: input device rejected --frames {frames} ({e}); \
+       falling back to backend default period"
+    );
+  }
+  cpal::BufferSize::Default
 }
 
 struct MyEguiApp {

@@ -6,7 +6,6 @@ use std::{
   time::Duration,
 };
 
-use bincode::config::standard;
 use clap::Parser;
 use hound::WavReader;
 use minimp3::{Decoder, Frame};
@@ -42,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let socket = UdpSocket::bind("0.0.0.0:0")?;
 
   // Send initial ping
-  let ping_packet = bincode::encode_to_vec(Packet::Ping, standard())?;
+  let ping_packet = postcard::to_allocvec(&Packet::Ping)?;
   socket.send_to(&ping_packet, args.address)?;
   println!("Sent ping to server");
 
@@ -62,8 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       buffer[i] = sample;
     }
 
-    let audio_packet =
-      bincode::encode_to_vec(Packet::Audio(buffer), standard())?;
+    let audio_packet = postcard::to_allocvec(&Packet::Audio(buffer))?;
     socket.send_to(&audio_packet, args.address)?;
 
     std::thread::sleep(Duration::from_secs_f32(0.0057));

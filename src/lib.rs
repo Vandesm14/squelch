@@ -3,18 +3,18 @@ pub mod jitter;
 
 use std::{sync::LazyLock, time::Duration};
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 pub const TX_BUFFER_SIZE: usize = 256;
 pub const MAX_PACKET_SIZE: usize = 4 * TX_BUFFER_SIZE + 8;
 
 pub type TxBuffer = [f32; TX_BUFFER_SIZE];
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
   Ping,
-  Audio(TxBuffer),
+  Audio(#[serde(with = "serde_arrays")] TxBuffer),
 }
 
 pub fn map_would_block<T>(result: std::io::Result<T>) -> std::io::Result<()> {

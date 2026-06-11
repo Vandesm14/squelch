@@ -5,7 +5,6 @@ use std::{
   time::Instant,
 };
 
-use bincode::config::{Configuration, standard};
 use squelch::{
   MAX_PACKET_SIZE, Packet, TX_BUFFER_SIZE, TxBuffer, WAIT_DURATION,
 };
@@ -72,8 +71,7 @@ fn main() -> std::io::Result<()> {
           if buf.iter().any(|a| *a != 0.0) {
             cloned_socket
               .send_to(
-                &bincode::encode_to_vec(Packet::Audio(buf), standard())
-                  .unwrap(),
+                &postcard::to_allocvec(&Packet::Audio(buf)).unwrap(),
                 client,
               )
               .unwrap();
@@ -91,11 +89,8 @@ fn main() -> std::io::Result<()> {
   let mut buf = [0; MAX_PACKET_SIZE];
   loop {
     let (_, src) = socket.recv_from(&mut buf)?;
-    match bincode::decode_from_slice::<Packet, Configuration>(
-      &buf,
-      bincode::config::standard(),
-    ) {
-      Ok((packet, _)) => match packet {
+    match postcard::from_bytes::<Packet>(&buf) {
+      Ok(packet) => match packet {
         Packet::Ping => {
           ping_tx.send(src).unwrap();
         }

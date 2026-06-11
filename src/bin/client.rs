@@ -10,7 +10,6 @@ use std::{
   time::Instant,
 };
 
-use bincode::config::{Configuration, standard};
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use eframe::egui::{self, Button, Sense};
@@ -226,10 +225,9 @@ fn main() {
 
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.set_nonblocking(true).unwrap();
-    map_would_block(socket.send_to(
-      &bincode::encode_to_vec(Packet::Ping, standard()).unwrap(),
-      address,
-    ))
+    map_would_block(
+      socket.send_to(&postcard::to_allocvec(&Packet::Ping).unwrap(), address),
+    )
     .unwrap();
 
     let mut last_ptt = false;
@@ -261,13 +259,10 @@ fn main() {
                 *s = s.clamp(-1.0, 1.0);
               }
 
-              map_would_block(
-                socket.send_to(
-                  &bincode::encode_to_vec(Packet::Audio(buf), standard())
-                    .unwrap(),
-                  address,
-                ),
-              )
+              map_would_block(socket.send_to(
+                &postcard::to_allocvec(&Packet::Audio(buf)).unwrap(),
+                address,
+              ))
               .unwrap();
 
               count += 1;
@@ -282,11 +277,8 @@ fn main() {
           },
         }
       } else if socket.recv_from(&mut buf).is_ok() {
-        match bincode::decode_from_slice::<Packet, Configuration>(
-          &buf,
-          bincode::config::standard(),
-        ) {
-          Ok((packet, _)) => match packet {
+        match postcard::from_bytes::<Packet>(&buf) {
+          Ok(packet) => match packet {
             Packet::Ping => todo!(),
             Packet::Audio(mut samples) => {
               last_packet = Instant::now();

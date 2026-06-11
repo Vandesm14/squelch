@@ -10,7 +10,6 @@ use std::{
   time::{SystemTime, UNIX_EPOCH},
 };
 
-use bincode::config::{Configuration, standard};
 use clap::Parser;
 use hound::{WavSpec, WavWriter};
 
@@ -66,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   socket.set_nonblocking(true)?;
 
   // Send initial ping to server to start receiving audio
-  let ping_packet = bincode::encode_to_vec(Packet::Ping, standard())?;
+  let ping_packet = postcard::to_allocvec(&Packet::Ping)?;
   socket.send_to(&ping_packet, args.address)?;
   println!("Sent ping to server at {}", args.address);
 
@@ -94,11 +93,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       match socket_clone.recv_from(&mut buf) {
         Ok((size, _)) => {
           // Decode the packet
-          match bincode::decode_from_slice::<Packet, Configuration>(
-            &buf[..size],
-            standard(),
-          ) {
-            Ok((packet, _)) => match packet {
+          match postcard::from_bytes::<Packet>(&buf[..size]) {
+            Ok(packet) => match packet {
               Packet::Ping => {
                 // Ignore ping packets
               }

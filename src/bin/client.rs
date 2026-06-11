@@ -51,17 +51,12 @@ pub struct Cli {
   #[arg(short, long, default_value_t = 1.0)]
   pub mic_gain: f32,
 
-  /// Playback jitter-buffer depth in milliseconds. Audio is pre-buffered
-  /// to roughly this much before playback (re)starts, to absorb network and
-  /// scheduling jitter. Higher = fewer pops but more latency.
+  /// Playback jitter-buffer depth in milliseconds.
   #[arg(long, default_value_t = 20)]
   pub jitter_ms: u64,
 
-  /// Audio device period size in frames (0 = backend default). The default
-  /// backend period on this machine is large (~32 ms), which sets a latency
-  /// floor. Request a small fixed period (e.g. 441 ≈ 10 ms) to enable
-  /// low-latency playback like Mumble's low-delay mode. Requires the audio
-  /// backend to honor small periods.
+  /// Audio device period size in frames (0 = backend default). Request a fixed
+  /// period (e.g. 441 ≈ 10 ms) for low latency.
   #[arg(long, default_value_t = 0)]
   pub frames: u32,
 }
